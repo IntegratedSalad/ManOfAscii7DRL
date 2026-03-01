@@ -7,7 +7,7 @@ Color = Tuple[int, int, int]
 
 
 @dataclass
-class Weapon:
+class Weapon: # move it to the item.py, as weapons will drop upon death, and can be picked up by other actors.
     name: str
     range: int
     base_accuracy: int  # percent

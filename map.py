@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Iterable, List, Optional, Tuple
 import random
 
+from item import Item
+
 import tcod
 
 Color = Tuple[int, int, int]
@@ -19,12 +21,14 @@ class Tile:
     name: str
 
 
-# Dark-ish VGA-ish tones (tweak later)
 OCEAN = Tile(ord("~"), (30, 80, 120), (5, 10, 20), False, True, "Ocean")
 SAND = Tile(ord("."), (120, 110, 60), (10, 10, 10), True, True, "Sand")
 GRASS = Tile(ord(","), (40, 120, 60), (8, 10, 8), True, True, "Grass")
 UPPER = Tile(ord(";"), (70, 140, 80), (8, 10, 8), True, True, "Upper Grass")
+TREE = Tile(ord("T"), (0, 160, 0), (8, 10, 8), False, False, "Tree")
 ROCK = Tile(ord("O"), (120, 120, 120), (10, 10, 10), False, False, "Rock")
+CONCRETE = Tile(ord("#"), (100, 100, 100), (10, 10, 10), False, False, "Concrete")
+DOOR = Tile(ord("+"), (200, 180, 120), (10, 10, 10), False, False, "Door")
 
 
 @dataclass
@@ -55,7 +59,7 @@ class GameMap:
         self.transparent[y][x] = tile.transparent
 
     @staticmethod
-    def generate_default(w: int, h: int) -> "GameMap":
+    def generate_beach(w: int, h: int) -> "GameMap":
         # Horizontal bands from bottom to top:
         # ocean -> sand -> grass -> upper grass w/ rocks
         tiles: List[List[Tile]] = [[GRASS for _ in range(w)] for _ in range(h)]
@@ -96,8 +100,91 @@ class GameMap:
 
         return gm
 
+    @staticmethod
+    def generate_forest(w: int, h: int) -> "GameMap":
+        tiles: List[List[Tile]] = [[UPPER for _ in range(w)] for _ in range(h)]
+
+        transparent = [[tiles[y][x].transparent for x in range(w)] for y in range(h)]
+        walkable = [[tiles[y][x].walkable for x in range(w)] for y in range(h)]
+        gm = GameMap(w=w, h=h, tiles=tiles, transparent=transparent, walkable=walkable)
+
+        rng = random.Random()
+
+        tree_count = (w * h) // 5  # roughly one tree per five cells
+        for _ in range(tree_count):
+            x = rng.randrange(0, w)
+            y = rng.randrange(0, h)
+            if gm.tile_at(x, y) == UPPER and rng.random() < 0.8:
+                gm.set_tile(x, y, TREE)
+
+        rock_count = (w * h) // 50
+        for _ in range(rock_count):
+            x = rng.randrange(0, w)
+            y = rng.randrange(0, h)
+            if gm.tile_at(x, y) == UPPER and rng.random() < 0.7:
+                gm.set_tile(x, y, ROCK)
+
+        return gm
+
+    @staticmethod
+    def generate_streets(w: int, h: int) -> tuple["GameMap", List["Item"]]:
+        tiles: List[List[Tile]] = [[SAND for _ in range(w)] for _ in range(h)]
+
+        transparent = [[tiles[y][x].transparent for x in range(w)] for y in range(h)]
+        walkable = [[tiles[y][x].walkable for x in range(w)] for y in range(h)]
+        gm = GameMap(w=w, h=h, tiles=tiles, transparent=transparent, walkable=walkable)
+
+        rng = random.Random()
+        starting_items: List[Item] = []
+
+        building_count = max(1, (w * h) // 300)
+        for _ in range(building_count):
+            bw = rng.randint(4, 8)
+            bh = rng.randint(4, 8)
+            bx = rng.randint(1, w - bw - 2)
+            by = rng.randint(1, h - bh - 2)
+
+            for x in range(bx, bx + bw):
+                gm.set_tile(x, by, CONCRETE)
+                gm.set_tile(x, by + bh - 1, CONCRETE)
+            for y in range(by, by + bh):
+                gm.set_tile(bx, y, CONCRETE)
+                gm.set_tile(bx + bw - 1, y, CONCRETE)
+
+            # one door on a random side
+            side = rng.choice(["north", "south", "east", "west"])
+            if side == "north":
+                dx = rng.randint(bx + 1, bx + bw - 2)
+                dy = by
+            elif side == "south":
+                dx = rng.randint(bx + 1, bx + bw - 2)
+                dy = by + bh - 1
+            elif side == "east":
+                dx = bx + bw - 1
+                dy = rng.randint(by + 1, by + bh - 2)
+            else:
+                dx = bx
+                dy = rng.randint(by + 1, by + bh - 2)
+            gm.set_tile(dx, dy, DOOR)
+
+            for _ in range(rng.randint(1, 3)):
+                cx = rng.randint(bx + 1, bx + bw - 2)
+                cy = rng.randint(by + 1, by + bh - 2)
+                if rng.random() < 0.5:
+                    starting_items.append(Item.ammo_crate(cx, cy, amount=rng.choice([6, 8, 10])))
+                else:
+                    starting_items.append(Item.med_crate(cx, cy, amount=rng.choice([3, 4, 5])))
+
+        rock_count = (w * h) // 140
+        for _ in range(rock_count):
+            x = rng.randrange(0, w)
+            y = rng.randrange(0, h)
+            if gm.tile_at(x, y) == SAND and rng.random() < 0.8:
+                gm.set_tile(x, y, ROCK)
+
+        return gm, starting_items
+
     def los(self, x0: int, y0: int, x1: int, y1: int) -> bool:
-        # True if line doesn't pass through blocking tiles (excluding origin)
         for x, y in tcod.los.bresenham((x0, y0), (x1, y1)).tolist():
             if (x, y) == (x0, y0):
                 continue
@@ -108,7 +195,6 @@ class GameMap:
         return True
 
     def cover_bonus_at(self, target_x: int, target_y: int) -> int:
-        # Simple: if target adjacent to any rock, treat as "in cover".
         for dx, dy in ((1,0),(-1,0),(0,1),(0,-1)):
             nx, ny = target_x + dx, target_y + dy
             if self.in_bounds(nx, ny) and self.tile_at(nx, ny) == ROCK:

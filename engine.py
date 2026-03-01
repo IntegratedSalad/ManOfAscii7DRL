@@ -10,7 +10,7 @@ import tcod.event
 
 from actor import Actor, RIFLE, SMG, SNIPER
 from item import Item
-from map import GameMap, ROCK
+from map import SAND, GameMap, ROCK, DOOR
 from screen import ScreenLayout
 
 
@@ -23,6 +23,7 @@ class MessageLog:
         if len(self.lines) > 200:
             self.lines = self.lines[-200:]
 
+    # add support for colors e.g. by storing List[Tuple[str, Color]] and adjusting rendering
 
 class Engine:
     def __init__(self, game_map: GameMap, layout: ScreenLayout) -> None:
@@ -53,12 +54,10 @@ class Engine:
     def setup_demo_match(self) -> None:
         w, h = self.game_map.w, self.game_map.h
 
-        # Spawn defenders (top area)
         self.actors.append(Actor(0, w // 2 - 3, 3, "Def-1", ord("D"), (120, 180, 255), 10, 10, RIFLE, 6, 12))
         self.actors.append(Actor(0, w // 2, 2, "Def-2", ord("D"), (120, 180, 255), 10, 10, SMG, 10, 10))
         self.actors.append(Actor(0, w // 2 + 3, 4, "Def-3", ord("D"), (120, 180, 255), 10, 10, SNIPER, 4, 8))
 
-        # Spawn attackers (bottom area above sand)
         y0 = h - 10
         self.actors.append(Actor(1, w // 2 - 3, y0, "Atk-1", ord("A"), (255, 180, 120), 10, 10, RIFLE, 6, 12))
         self.actors.append(Actor(1, w // 2, y0 + 1, "Atk-2", ord("A"), (255, 180, 120), 10, 10, SMG, 10, 10))
@@ -122,7 +121,7 @@ class Engine:
     MOVE_COST = 1
     SHOOT_COST = 3
     RELOAD_COST = 2
-    PICKUP_COST = 1
+    PICKUP_COST = 2
 
     # ----------------- Events / Input -----------------
     def handle_event(self, event: tcod.event.Event) -> None:
@@ -154,7 +153,10 @@ class Engine:
             self.end_turn()
             return
 
-        # Movement / aiming cursor
+        if ev.sym == tcod.event.KeySym.O:
+            self.try_open_door()
+            return
+
         dx, dy = 0, 0
         if ev.sym == tcod.event.KeySym.UP:
             dy = -1
@@ -215,6 +217,8 @@ class Engine:
         self.turn_count += 1
         self.log.add(f"--- Turn {self.turn_count}: {'Attackers' if self.current_team==1 else 'Defenders'} ---")
 
+        # Add summary of damage of the last turn, e.g. "Def-2 took 3 damage, Atk-1 took 4 damage"
+
         # Spawn crates at end of a full round (both teams took turns) -> approximate by every N turns
         if self.turn_count % self.crate_every_n_turns == 0:
             self.spawn_random_crate()
@@ -236,6 +240,11 @@ class Engine:
             return
 
         nx, ny = sel.x + dx, sel.y + dy
+        if self.game_map.tile_at(nx, ny) == DOOR:
+            self.log.add("The door is closed.")
+            self.team_ap[self.current_team] += self.MOVE_COST  # refund for QoL
+            return
+
         if not self.game_map.is_walkable(nx, ny):
             self.log.add("Blocked terrain.")
             self.team_ap[self.current_team] += self.MOVE_COST  # refund for QoL
@@ -247,6 +256,24 @@ class Engine:
 
         sel.x, sel.y = nx, ny
         self.aim_x, self.aim_y = sel.x, sel.y
+
+    def try_open_door(self) -> None:
+        sel = self.get_selected_actor()
+        if not sel or not sel.alive:
+            return
+        if not self._spend_ap(self.MOVE_COST):
+            return
+
+        # Check adjacent tiles for a door
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nx, ny = sel.x + dx, sel.y + dy
+            if self.game_map.tile_at(nx, ny) == DOOR:
+                self.game_map.set_tile(nx, ny, SAND)
+                self.log.add(f"{sel.name} opens the door.")
+                return
+
+        self.log.add("No door adjacent to open.")
+        self.team_ap[self.current_team] += self.MOVE_COST  # refund for QoL
 
     def _move_aim(self, dx: int, dy: int) -> None:
         self.aim_x = max(0, min(self.game_map.w - 1, self.aim_x + dx))
@@ -313,9 +340,13 @@ class Engine:
             self.log.add("No line of sight.")
             return
 
-        # If no target: still show shot
+        # Allow blowing up doors
         if not target or target.team_id == shooter.team_id:
-            self.log.add(f"{shooter.name} fires.")
+            if self.game_map.tile_at(tx, ty) == DOOR:
+                self.game_map.set_tile(tx, ty, SAND)
+                self.log.add(f"{shooter.name} shoots and blows open the door!")
+            else:
+                self.log.add(f"{shooter.name} fires.")
             return
 
         # Accuracy calc

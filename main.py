@@ -18,17 +18,25 @@ def main() -> None:
         charmap=tcod.tileset.CHARMAP_CP437,
     )
 
-
-    # If you don't have that tilesheet file, easiest quick fix:
-    # 1) copy a tilesheet into your project folder, or
-    # 2) use tcod.tileset.load_tilesheet with a file you do have.
-    # You can also use built-in tileset via tcod.tileset.load_tilesheet from installed package assets
-    # (paths differ by install). For 7DRL, just bundle your tilesheet.
-
     map_w, map_h = layout.map_w, layout.map_h
-    game_map = GameMap.generate_default(map_w, map_h)
+    maps_data = [GameMap.generate_beach(map_w, map_h), GameMap.generate_streets(map_w, map_h), GameMap.generate_forest(map_w, map_h), GameMap.generate_forest(map_w, map_h)]
 
-    engine = Engine(game_map=game_map, layout=layout)
+    # maaaaybe, create a 2D grid of maps.  For now, just load one map and ignore the rest.  But we can easily extend the engine to support multiple maps and transitions between them.
+    # So they all have to have some cohesive layout, like a NxN grid of maps.
+    # E.g. beach spans in the bottom, then streets in the middle, then forest in the top.
+    # We also could add enemies that can move between maps, or have some maps be inaccessible until certain conditions are met.
+    # Let the demo be 4 maps, you have to kill all enemy soldiers in each map to progress to the next map.  For now, just load one map and ignore the rest.
+
+    # game_map = GameMap.generate_forest(map_w, map_h)
+    game_map = GameMap.generate_streets(map_w, map_h)
+
+    if type(game_map) == tuple:
+        game_map, items = game_map
+    else:
+        items = []
+
+    engine = Engine(game_map=game_map, layout=layout) # TODO: game engine loads next map in maps_data
+    engine.items.extend(items)
     engine.setup_demo_match()
 
     with tcod.context.new_terminal(
@@ -48,7 +56,6 @@ def main() -> None:
             for event in tcod.event.wait():
                 engine.handle_event(event)
                 # If one event ends turn etc, we still continue processing input next frame.
-
 
 if __name__ == "__main__":
     main()
