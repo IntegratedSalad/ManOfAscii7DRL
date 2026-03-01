@@ -12,16 +12,23 @@ from actor import Actor, RIFLE, SMG, SNIPER
 from item import Item
 from map import SAND, GameMap, ROCK, DOOR
 from screen import ScreenLayout
-
+import textwrap
 
 @dataclass
 class MessageLog:
     lines: List[str]
+    layout: ScreenLayout
 
     def add(self, msg: str) -> None:
         self.lines.append(msg)
         if len(self.lines) > 200:
             self.lines = self.lines[-200:]
+
+        # wrap messages
+        wrapped = []
+        for line in self.lines:
+            wrapped.extend(textwrap.wrap(line, self.layout.log_rect.w - 2))
+        self.lines = wrapped
 
     # add support for colors e.g. by storing List[Tuple[str, Color]] and adjusting rendering
 
@@ -39,7 +46,7 @@ class Engine:
         self.bullet_timer = 0.0  # time accumulator for advancing bullet animation
         self.bullet_step_time = 0.03  # time per step in seconds
 
-        self.log = MessageLog(lines=[])
+        self.log = MessageLog(lines=[], layout=self.layout)
         self.running = True
 
         self.current_team: int = 1  # 1 attackers start, 0 defenders
@@ -373,13 +380,17 @@ class Engine:
         self.bullet_timer = 0.0
 
         # Allow blowing up doors
-        if not target or target.team_id == shooter.team_id:
+        if not target: #or target.team_id == shooter.team_id:
             if self.game_map.tile_at(tx, ty) == DOOR:
                 self.game_map.set_tile(tx, ty, SAND)
                 self.log.add(f"{shooter.name} shoots and blows open the door!")
             else:
                 self.log.add(f"{shooter.name} fires.")
             return
+
+        friendly_fire = target.team_id == shooter.team_id
+        if friendly_fire:
+            self.log.add(f"Friendly fire from {shooter.name}! Idiot!")
 
         # Accuracy calc
         acc = shooter.weapon.base_accuracy
@@ -398,9 +409,16 @@ class Engine:
             self.log.add(f"{shooter.name} hits {target.name} ({shooter.weapon.damage} dmg) [{roll} <= {acc}]")
             if not target.alive:
                 self.log.add(f"{target.name} is DOWN!")
-                self._check_victory()
+                if not friendly_fire:
+                    self._check_victory()
+                else:
+                    # choose random insult for friendly fire
+                    insults = ["Fucking cretin!", "Bro wtf", "Open your fucking eyes maybe??", "What the fuck, it was his birthday!"]
+                    self.log.add(f"{random.choice(insults)}")
         else:
             self.log.add(f"{shooter.name} misses {target.name} [{roll} > {acc}]")
+            if friendly_fire:
+                self.log.add(f"{target.name}: Bro you nearly fucking shot me")
 
     # ----------------- Crates -----------------
     def spawn_random_crate(self) -> None:
