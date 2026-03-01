@@ -131,7 +131,7 @@ class Engine:
             self.running = False
 
     # ----------------- Costs -----------------
-    MOVE_COST = 1
+    MOVE_COST = 0
     SHOOT_COST = 3
     RELOAD_COST = 2
     PICKUP_COST = 2
@@ -262,24 +262,25 @@ class Engine:
 
     def try_move_selected(self, dx: int, dy: int) -> None:
         sel = self.get_selected_actor()
+        nx, ny = sel.x + dx, sel.y + dy
+        tile_cost = self.game_map.return_movement_cost(nx, ny)
         if not sel or not sel.alive:
             return
-        if not self._spend_ap(self.MOVE_COST):
+        if not self._spend_ap(self.MOVE_COST + tile_cost):
             return
 
-        nx, ny = sel.x + dx, sel.y + dy
         if self.game_map.tile_at(nx, ny) == DOOR:
             self.log.add("The door is closed.")
-            self.team_ap[self.current_team] += self.MOVE_COST  # refund for QoL
+            self.team_ap[self.current_team] += self.MOVE_COST + tile_cost
             return
 
         if not self.game_map.is_walkable(nx, ny):
             self.log.add("Blocked terrain.")
-            self.team_ap[self.current_team] += self.MOVE_COST  # refund for QoL
+            self.team_ap[self.current_team] += self.MOVE_COST + tile_cost
             return
         if self.actor_at(nx, ny) is not None:
             self.log.add("Tile occupied.")
-            self.team_ap[self.current_team] += self.MOVE_COST
+            self.team_ap[self.current_team] += self.MOVE_COST + tile_cost
             return
 
         sel.x, sel.y = nx, ny

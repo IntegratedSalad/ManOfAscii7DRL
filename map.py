@@ -19,12 +19,13 @@ class Tile:
     walkable: bool
     transparent: bool
     name: str
+    movement_cost: int = 1
 
 
-OCEAN = Tile(ord("~"), (30, 80, 120), (5, 10, 20), False, True, "Ocean")
+OCEAN = Tile(ord("~"), (30, 80, 120), (5, 10, 20), False, True, "Ocean", movement_cost=4)
 SAND = Tile(ord("."), (120, 110, 60), (10, 10, 10), True, True, "Sand")
 GRASS = Tile(ord(","), (40, 120, 60), (8, 10, 8), True, True, "Grass")
-UPPER = Tile(ord(";"), (70, 140, 80), (8, 10, 8), True, True, "Upper Grass")
+UPPER = Tile(ord(";"), (70, 140, 80), (8, 10, 8), True, True, "Upper Grass", movement_cost=2)
 TREE = Tile(ord("T"), (0, 160, 0), (8, 10, 8), False, False, "Tree")
 ROCK = Tile(ord("O"), (120, 120, 120), (10, 10, 10), False, False, "Rock")
 CONCRETE = Tile(ord("#"), (100, 100, 100), (10, 10, 10), False, False, "Concrete")
@@ -49,6 +50,9 @@ class GameMap:
 
     def is_walkable(self, x: int, y: int) -> bool:
         return self.in_bounds(x, y) and self.walkable[y][x]
+
+    def return_movement_cost(self, x: int, y: int) -> int:
+        return self.tiles[y][x].movement_cost
 
     def blocks_los(self, x: int, y: int) -> bool:
         return self.in_bounds(x, y) and (not self.transparent[y][x])

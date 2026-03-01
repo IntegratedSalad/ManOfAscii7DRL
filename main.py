@@ -28,7 +28,7 @@ def main() -> None:
     # Let the demo be 4 maps, you have to kill all enemy soldiers in each map to progress to the next map.  For now, just load one map and ignore the rest.
 
     # game_map = GameMap.generate_forest(map_w, map_h)
-    game_map = GameMap.generate_streets(map_w, map_h)
+    game_map = GameMap.generate_beach(map_w, map_h)
 
     if type(game_map) == tuple:
         game_map, items = game_map
