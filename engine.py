@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 import random
 import math
 
@@ -13,6 +13,19 @@ from item import Item
 from map import SAND, GameMap, ROCK, DOOR
 from screen import ScreenLayout
 import textwrap
+
+ImpactType = Literal["actor", "tile", "none"]
+
+@dataclass
+class PendingImpact:
+    impact_type: ImpactType
+    actor: Optional[Actor]
+    tile_xy: Optional[Tuple[int, int]]
+    shooter_name: str
+    damage: int
+    acc: int
+    roll: int
+    is_hit_roll: bool
 
 @dataclass
 class MessageLog:
@@ -63,7 +76,8 @@ class Engine:
         self.turn_count: int = 1
         self.crate_every_n_turns: int = 4
 
-    # ----------------- Setup -----------------
+        self.pending_impact: Optional[PendingImpact] = None
+
     def setup_demo_match(self) -> None:
         w, h = self.game_map.w, self.game_map.h
 
@@ -86,7 +100,6 @@ class Engine:
 
         self.log.add("Controls: Arrows move | Tab cycle | F aim/fire | R reload | G pickup | Space end turn | Esc quit")
 
-    # ----------------- Query helpers -----------------
     def alive_actors(self) -> List[Actor]:
         return [a for a in self.actors if a.alive]
 
@@ -130,13 +143,11 @@ class Engine:
             self.log.add("Defenders win! (All attackers down)")
             self.running = False
 
-    # ----------------- Costs -----------------
     MOVE_COST = 0
     SHOOT_COST = 3
     RELOAD_COST = 2
     PICKUP_COST = 2
 
-    # ----------------- Events / Input -----------------
     def update(self, dt: float) -> None:
         if not self.bullet_path:
             return
@@ -151,6 +162,46 @@ class Engine:
             if self.bullet_index >= len(self.bullet_path):
                 self.bullet_path = []
                 self.bullet_index = 0
+                self._resolve_pending_impact()
+
+    def _resolve_pending_impact(self) -> None:
+        if not self.pending_impact:
+            return
+
+        imp = self.pending_impact
+        self.pending_impact = None
+
+        if imp.impact_type == "actor" and imp.actor and imp.actor.alive:
+            imp.actor.take_damage(imp.damage)
+            self.log.add(f"{imp.shooter_name} shoots and hits {imp.actor.name} for {imp.damage} damage! (Acc: {imp.acc}%, Roll: {imp.roll})")
+
+            friendly_fire = imp.actor.team_id == imp.actor.team_id
+            if friendly_fire:
+                self.log.add(f"Friendly fire from {imp.actor.name}! Idiot!")
+
+            if not imp.actor.alive:
+                self.log.add(f"{imp.actor.name} is down!")
+                if not friendly_fire:
+                    self._check_victory()
+                else:
+                    insults = ["Fucking cretin!", "Bro wtf", "Open your fucking eyes maybe??", "What the fuck, it was his birthday!"]
+                    self.log.add(f"{random.choice(insults)}")
+            return
+
+        if imp.impact_type == "tile" and imp.tile_xy:
+            x, y = imp.tile_xy
+            if self.game_map.tile_at(x, y) == DOOR:
+                self.game_map.set_tile(x, y, SAND)
+                self.log.add(f"{imp.shooter_name} blows open the door!")
+            else:
+                self.log.add(f"{imp.shooter_name} hits {self.game_map.tile_at(x,y).name}.")
+            return
+
+        self.log.add(f"{imp.shooter_name} fires.")
+
+
+    def is_bullet_animation_active(self) -> bool:
+        return len(self.bullet_path) > 0
 
     def handle_event(self, event: tcod.event.Event) -> None:
         if isinstance(event, tcod.event.Quit):
@@ -165,6 +216,10 @@ class Engine:
             pass
 
     def _handle_keydown(self, ev: tcod.event.KeyDown) -> None:
+
+        if self.is_bullet_animation_active():
+            return
+
         if ev.sym == tcod.event.KeySym.ESCAPE:
             if self.aiming:
                 self.aiming = False
@@ -237,6 +292,7 @@ class Engine:
             self.aim_x, self.aim_y = sel.x, sel.y
 
     def end_turn(self) -> None:
+
         self.aiming = False
         self.current_team = 1 - self.current_team
         self.team_ap[self.current_team] = self.team_ap_max
@@ -245,7 +301,7 @@ class Engine:
         self.turn_count += 1
         self.log.add(f"--- Turn {self.turn_count}: {'Attackers' if self.current_team==1 else 'Defenders'} ---")
 
-        # Add summary of damage of the last turn, e.g. "Def-2 took 3 damage, Atk-1 took 4 damage"
+        # TODO: Add summary of damage of the last turn, e.g. "Def-2 took 3 damage, Atk-1 took 4 damage"
 
         # Spawn crates at end of a full round (both teams took turns) -> approximate by every N turns
         if self.turn_count % self.crate_every_n_turns == 0:
@@ -342,6 +398,53 @@ class Engine:
 
         self.items.remove(it)
 
+    def miss_offset_by_acc_(self, acc: int) -> int:
+        # If roll >= acc, so offset decreases with accuracy increase
+        if acc >= 95: return 1
+        if acc >= 90: return 4
+        if acc >= 80: return 5
+        if acc >= 70: return 10
+        if acc >= 60: return 10
+        if acc >= 50: return 25
+        if acc >= 40: return 30
+        if acc >= 30: return 30
+        if acc >= 20: return 40
+        if acc >= 10: return 45
+        return 50
+
+    def pick_miss_endpoint(
+            self,
+            sx: int,
+            sy: int,
+            tx: int,
+            ty: int,
+            acc: int,
+            map_w: int,
+            map_h: int
+        ) -> Tuple[int, int]:
+        k = self.miss_offset_by_acc_(acc)
+        if k <= 0:
+            return tx, ty
+
+        dx = tx - sx
+        dy = ty - sy
+        length = max(1, abs(dx) + abs(dy))
+
+        pdx, pdy = -dy, dx
+        m = max(1, abs(pdx) + abs(pdy))
+        pdx /= m
+        pdy /= m
+
+        lateral = random.randint(-k, k)
+        forward = random.randint(-max(1, k // 4), max(1, k // 4))
+
+        mx = int(round(tx + pdx * lateral + (dx / length) * forward))
+        my = int(round(ty + pdy * lateral + (dy / length) * forward))
+
+        mx = max(0, min(map_w - 1, mx))
+        my = max(0, min(map_h - 1, my))
+        return mx, my
+
     def try_shoot_at_cursor(self) -> None:
         shooter = self.get_selected_actor()
         if not shooter or not shooter.alive:
@@ -351,75 +454,130 @@ class Engine:
 
         if shooter.ammo_in_mag <= 0:
             self.log.add("Click! No ammo in mag.")
-            self.team_ap[self.current_team] += self.SHOOT_COST  # refund
+            self.team_ap[self.current_team] += self.SHOOT_COST
             return
 
         tx, ty = self.aim_x, self.aim_y
+        if tx == shooter.x and ty == shooter.y:
+            self.team_ap[self.current_team] += self.SHOOT_COST
+            return
+
         target = self.actor_at(tx, ty)
 
-        # consume ammo regardless of hit (simple)
         shooter.ammo_in_mag -= 1
 
         # Range + LOS check
-        dist = abs(tx - shooter.x) + abs(ty - shooter.y)  # cheap L1; fine for 7DRL
-        if dist > shooter.weapon.range:
-            self.log.add("Out of range.")
-            return
+        dist = abs(tx - shooter.x) + abs(ty - shooter.y)
+        # if dist > shooter.weapon.range:
+        #     self.log.add("Out of range.")
+        #     return
         if not self.game_map.los(shooter.x, shooter.y, tx, ty):
             self.log.add("No line of sight.")
             return
-        line = tcod.los.bresenham((shooter.x, shooter.y), (tx, ty)).tolist()
 
+        # Accuracy calc
+        acc = shooter.weapon.base_accuracy
+        # Distance penalty after 5 tiles TODO: calculate the penalty based on the weapon range
+        if dist > 5:
+            acc -= 2 * (dist - 5)
+
+        if target:
+            acc -= self.game_map.cover_bonus_at(target.x, target.y)
+
+        to_hit_roll = random.randint(1, 100)
+        acc = max(5, min(95, acc))
+        is_hit = to_hit_roll <= acc
+
+        bx, by = tx, ty
+        if not is_hit:
+            # offset the bullet path (tx,ty) taking accuracy into account when the roll <= acc
+            bx, by = self.pick_miss_endpoint(shooter.x, shooter.y, tx, ty, acc, self.game_map.w, self.game_map.h)
+            self.log.add(f"{shooter.name}'s hand shakes!")
+
+        line = tcod.los.bresenham((shooter.x, shooter.y), (bx, by)).tolist()
         path: List[Tuple[int, int]] = []
+
+        impact_actor: Optional[Actor] = None
+        impact_tile: Optional[Tuple[int, int]] = None
+
         for x, y in line[1:]:
-            path.append((int(x), int(y)))
+            x, y = int(x), int(y)
+            path.append((x, y))
+
+            a = self.actor_at(x, y)
+            if a and a.alive:
+                impact_actor = a
+                break
+
             if self.game_map.blocks_los(x, y):
+                impact_tile = (x, y)
                 break
 
         self.bullet_path = path
         self.bullet_index = 0
         self.bullet_timer = 0.0
 
-        # Allow blowing up doors
-        if not target: #or target.team_id == shooter.team_id:
-            if self.game_map.tile_at(tx, ty) == DOOR:
-                self.game_map.set_tile(tx, ty, SAND)
-                self.log.add(f"{shooter.name} shoots and blows open the door!")
-            else:
-                self.log.add(f"{shooter.name} fires.")
-            return
-
-        friendly_fire = target.team_id == shooter.team_id
-        if friendly_fire:
-            self.log.add(f"Friendly fire from {shooter.name}! Idiot!")
-
-        # Accuracy calc
-        acc = shooter.weapon.base_accuracy
-
-        # Distance penalty after 5 tiles
-        if dist > 5:
-            acc -= 2 * (dist - 5)
-
-        cover = self.game_map.cover_bonus_at(target.x, target.y)
-        acc -= cover
-
-        acc = max(5, min(95, acc))
-        roll = random.randint(1, 100)
-        if roll <= acc:
-            target.take_damage(shooter.weapon.damage)
-            self.log.add(f"{shooter.name} hits {target.name} ({shooter.weapon.damage} dmg) [{roll} <= {acc}]")
-            if not target.alive:
-                self.log.add(f"{target.name} is DOWN!")
-                if not friendly_fire:
-                    self._check_victory()
-                else:
-                    # choose random insult for friendly fire
-                    insults = ["Fucking cretin!", "Bro wtf", "Open your fucking eyes maybe??", "What the fuck, it was his birthday!"]
-                    self.log.add(f"{random.choice(insults)}")
+        if impact_actor is not None:
+            self.pending_impact = PendingImpact(
+                impact_type="actor",
+                actor=impact_actor,
+                tile_xy=None,
+                shooter_name=shooter.name,
+                damage=shooter.weapon.damage,
+                acc=acc,
+                roll=to_hit_roll,
+                is_hit_roll=is_hit
+            )
+        elif impact_tile is not None:
+            self.pending_impact = PendingImpact(
+                impact_type="tile",
+                actor=None,
+                tile_xy=impact_tile,
+                shooter_name=shooter.name,
+                damage=0,
+                acc=acc,
+                roll=to_hit_roll,
+                is_hit_roll=is_hit
+            )
         else:
-            self.log.add(f"{shooter.name} misses {target.name} [{roll} > {acc}]")
-            if friendly_fire:
-                self.log.add(f"{target.name}: Bro you nearly fucking shot me")
+            self.pending_impact = PendingImpact(
+                impact_type="none",
+                actor=None,
+                tile_xy=None,
+                shooter_name=shooter.name,
+                damage=0,
+                acc=acc,
+                roll=to_hit_roll,
+                is_hit_roll=is_hit
+            )
+
+        # Allow blowing up doors
+        # if not target: #or target.team_id == shooter.team_id:
+        #     if self.game_map.tile_at(tx, ty) == DOOR:
+        #         self.game_map.set_tile(tx, ty, SAND)
+        #         self.log.add(f"{shooter.name} shoots and blows open the door!")
+        #     else:
+        #         self.log.add(f"{shooter.name} fires.")
+        # else:
+        #     friendly_fire = target.team_id == shooter.team_id
+        #     if friendly_fire:
+        #         self.log.add(f"Friendly fire from {shooter.name}! Idiot!")
+
+        #     if to_hit_roll <= acc:
+        #         target.take_damage(shooter.weapon.damage)
+        #         self.log.add(f"{shooter.name} hits {target.name} ({shooter.weapon.damage} dmg) [{to_hit_roll} <= {acc}]")
+        #         if not target.alive:
+        #             self.log.add(f"{target.name} is DOWN!")
+        #             if not friendly_fire:
+        #                 self._check_victory()
+        #             else:
+        #                 # choose random insult for friendly fire
+        #                 insults = ["Fucking cretin!", "Bro wtf", "Open your fucking eyes maybe??", "What the fuck, it was his birthday!"]
+        #                 self.log.add(f"{random.choice(insults)}")
+        #     else:
+        #         self.log.add(f"{shooter.name} misses {target.name} [{to_hit_roll} > {acc}]")
+        #         if friendly_fire:
+        #             self.log.add(f"{target.name}: Bro you nearly fucking shot me")
 
     # ----------------- Crates -----------------
     def spawn_random_crate(self) -> None:
@@ -443,9 +601,7 @@ class Engine:
             self.log.add(f"A crate drops at ({x},{y})!")
             return
 
-    # ----------------- Rendering -----------------
     def render(self, con: tcod.Console) -> None:
-        # Panels
         self._render_map(con)
         self._render_soldiers_panel(con)
         self._render_equip_panel(con)
@@ -460,20 +616,16 @@ class Engine:
                 t = self.game_map.tile_at(x, y)
                 con.print(x=r.x + x, y=r.y + y, string=chr(t.ch), fg=t.fg, bg=t.bg)
 
-        # items
         for it in self.items:
             con.print(r.x + it.x, r.y + it.y, chr(it.ch), fg=it.fg)
 
-        # actors
         for a in self.alive_actors():
             con.print(r.x + a.x, r.y + a.y, chr(a.ch), fg=a.fg)
 
-        # selection marker
         sel = self.get_selected_actor()
         if sel:
             con.print(r.x + sel.x, r.y + sel.y, "X", fg=(255, 255, 255))
 
-        # aiming cursor + LOS line
         if self.aiming and sel:
             con.print(r.x + self.aim_x, r.y + self.aim_y, "+", fg=(255, 255, 255))
             # draw thin line (dots) for feedback
@@ -498,11 +650,9 @@ class Engine:
             bx, by = self.bullet_path[self.bullet_index]
             con.print(r.x + bx, r.y + by, "*", fg=(255, 220, 100))
 
-        # top status on map
         con.print(r.x + 1, r.y + 0, f"Team: {'ATK' if self.current_team==1 else 'DEF'}  AP: {self.team_ap[self.current_team]}/{self.team_ap_max}", fg=(220, 220, 220))
 
     def _panel_frame(self, con: tcod.Console, x: int, y: int, w: int, h: int, title: str) -> None:
-        # Very simple frame
         con.draw_frame(x, y, w, h, title=title, clear=False, fg=(160, 160, 160))
 
     def _render_soldiers_panel(self, con: tcod.Console) -> None:
