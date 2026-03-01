@@ -51,7 +51,7 @@ def main() -> None:
         title="7DRL Tactical Beach (tcod)",
         vsync=True,
     ) as context:
-        root_console = tcod.Console(layout.screen_w, layout.screen_h, order="F")
+        root_console = context.new_console(layout.screen_w, layout.screen_h, order="F")
 
         while engine.running:
             now = time.perf_counter()

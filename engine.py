@@ -14,6 +14,8 @@ from map import SAND, GameMap, ROCK, DOOR
 from screen import ScreenLayout
 import textwrap
 
+from utils import *
+
 ImpactType = Literal["actor", "tile", "none"]
 
 @dataclass
@@ -400,6 +402,7 @@ class Engine:
 
     def miss_offset_by_acc_(self, acc: int) -> int:
         # If roll >= acc, so offset decreases with accuracy increase
+        # To hit, you need to roll < acc
         if acc >= 95: return 1
         if acc >= 90: return 4
         if acc >= 80: return 5
@@ -411,6 +414,12 @@ class Engine:
         if acc >= 20: return 40
         if acc >= 10: return 45
         return 50
+
+    def compute_spread_acc(self, shooter: Actor, dist: int) -> int:
+        acc = shooter.weapon.base_accuracy
+        if dist > 5:
+            acc -= 2 * (dist - 5)
+        return clamp(acc, 5, 95)
 
     def pick_miss_endpoint(
             self,
@@ -468,25 +477,21 @@ class Engine:
 
         # Range + LOS check
         dist = abs(tx - shooter.x) + abs(ty - shooter.y)
-        # if dist > shooter.weapon.range:
-        #     self.log.add("Out of range.")
-        #     return
         if not self.game_map.los(shooter.x, shooter.y, tx, ty):
             self.log.add("No line of sight.")
             return
 
         # Accuracy calc
-        acc = shooter.weapon.base_accuracy
-        # Distance penalty after 5 tiles TODO: calculate the penalty based on the weapon range
-        if dist > 5:
-            acc -= 2 * (dist - 5)
 
+        acc = self.compute_spread_acc(shooter, dist)
         if target:
             acc -= self.game_map.cover_bonus_at(target.x, target.y)
 
         to_hit_roll = random.randint(1, 100)
-        acc = max(5, min(95, acc))
+        acc = clamp(acc, 5, 95)
         is_hit = to_hit_roll <= acc
+
+        print(f"acc: {acc}, roll: {to_hit_roll}, is_hit: {is_hit}")
 
         bx, by = tx, ty
         if not is_hit:
@@ -504,13 +509,18 @@ class Engine:
             x, y = int(x), int(y)
             path.append((x, y))
 
-            a = self.actor_at(x, y)
-            if a and a.alive:
-                impact_actor = a
-                break
-
             if self.game_map.blocks_los(x, y):
                 impact_tile = (x, y)
+                break
+
+            a = self.actor_at(x, y)
+            if a and a.alive:
+                acc -= self.game_map.cover_bonus_at(x, y)  # cover affects any victim, not just the intended target
+                acc = clamp(acc, 5, 95)
+
+                roll = random.randint(1, 100)
+                if roll <= acc:
+                    impact_actor = a
                 break
 
         self.bullet_path = path
