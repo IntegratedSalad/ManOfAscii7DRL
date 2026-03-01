@@ -663,7 +663,10 @@ class Engine:
         con.print(r.x + 1, r.y + 0, f"Team: {'ATK' if self.current_team==1 else 'DEF'}  AP: {self.team_ap[self.current_team]}/{self.team_ap_max}", fg=(220, 220, 220))
 
     def _panel_frame(self, con: tcod.Console, x: int, y: int, w: int, h: int, title: str) -> None:
-        con.draw_frame(x, y, w, h, title=title, clear=False, fg=(160, 160, 160))
+        fg = (160, 160, 160)
+        bg = (0, 0, 0)
+        con.draw_frame(x, y, w, h, clear=False, fg=fg, bg=bg)
+        con.print_box(x + 2, y, w - 4, 1, f" {title} ", fg=fg, bg=bg)
 
     def _render_soldiers_panel(self, con: tcod.Console) -> None:
         r = self.layout.soldiers_rect
