@@ -33,6 +33,12 @@ class Engine:
         self.actors: List[Actor] = []
         self.items: List[Item] = []
 
+        # bullet animation state: path and current index
+        self.bullet_path: List[Tuple[int,int]] = []
+        self.bullet_index: int = 0  # which step is currently visible
+        self.bullet_timer = 0.0  # time accumulator for advancing bullet animation
+        self.bullet_step_time = 0.03  # time per step in seconds
+
         self.log = MessageLog(lines=[])
         self.running = True
 
@@ -124,6 +130,21 @@ class Engine:
     PICKUP_COST = 2
 
     # ----------------- Events / Input -----------------
+    def update(self, dt: float) -> None:
+        if not self.bullet_path:
+            return
+
+        dt = min(dt, 0.05)
+
+        self.bullet_timer += dt
+        if self.bullet_timer >= self.bullet_step_time:
+            self.bullet_timer = 0.0
+            self.bullet_index += 1 # here advance the bullet "animation" after timer exceeds step time
+
+            if self.bullet_index >= len(self.bullet_path):
+                self.bullet_path = []
+                self.bullet_index = 0
+
     def handle_event(self, event: tcod.event.Event) -> None:
         if isinstance(event, tcod.event.Quit):
             self.running = False
@@ -328,7 +349,7 @@ class Engine:
         tx, ty = self.aim_x, self.aim_y
         target = self.actor_at(tx, ty)
 
-        # Consume ammo regardless of hit (simple)
+        # consume ammo regardless of hit (simple)
         shooter.ammo_in_mag -= 1
 
         # Range + LOS check
@@ -339,6 +360,17 @@ class Engine:
         if not self.game_map.los(shooter.x, shooter.y, tx, ty):
             self.log.add("No line of sight.")
             return
+        line = tcod.los.bresenham((shooter.x, shooter.y), (tx, ty)).tolist()
+
+        path: List[Tuple[int, int]] = []
+        for x, y in line[1:]:
+            path.append((int(x), int(y)))
+            if self.game_map.blocks_los(x, y):
+                break
+
+        self.bullet_path = path
+        self.bullet_index = 0
+        self.bullet_timer = 0.0
 
         # Allow blowing up doors
         if not target or target.team_id == shooter.team_id:
@@ -442,6 +474,10 @@ class Engine:
                 acc -= cover
                 acc = max(5, min(95, acc))
                 con.print(r.x + 1, r.y + 1, f"Hit% {acc}  (cover {cover})", fg=(220, 220, 220))
+
+        if self.bullet_path:
+            bx, by = self.bullet_path[self.bullet_index]
+            con.print(r.x + bx, r.y + by, "*", fg=(255, 220, 100))
 
         # top status on map
         con.print(r.x + 1, r.y + 0, f"Team: {'ATK' if self.current_team==1 else 'DEF'}  AP: {self.team_ap[self.current_team]}/{self.team_ap_max}", fg=(220, 220, 220))

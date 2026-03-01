@@ -1,5 +1,5 @@
+import time
 import tcod
-
 from engine import Engine
 from map import GameMap
 from screen import ScreenLayout
@@ -39,6 +39,11 @@ def main() -> None:
     engine.items.extend(items)
     engine.setup_demo_match()
 
+    TARGET_FPS = 60
+    FRAME_TIME = 1.0 / TARGET_FPS
+
+    last = time.perf_counter()
+
     with tcod.context.new_terminal(
         layout.screen_w,
         layout.screen_h,
@@ -49,13 +54,22 @@ def main() -> None:
         root_console = tcod.Console(layout.screen_w, layout.screen_h, order="F")
 
         while engine.running:
+            now = time.perf_counter()
+            dt = now - last # how many seconds since last frame?
+            last = now
+
+            for event in tcod.event.get(): # use polling instead of waiting - allows for animations
+                engine.handle_event(event)
+
+            engine.update(dt)
+
             root_console.clear()
             engine.render(root_console)
             context.present(root_console)
 
-            for event in tcod.event.wait():
-                engine.handle_event(event)
-                # If one event ends turn etc, we still continue processing input next frame.
+            elapsed = time.perf_counter() - now
+            if elapsed < FRAME_TIME:
+                time.sleep(FRAME_TIME - elapsed)
 
 if __name__ == "__main__":
     main()
