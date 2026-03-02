@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Tuple, Optional
 
 Color = Tuple[int, int, int]
@@ -24,7 +24,9 @@ class BodyPart:
     name: str
     hp: int
     hp_max: int
-    hit_chance_modifier: int  # percent, added to the weapon's base accuracy when targeting this body part
+    hit_chance_modifier: float # percent, added to the weapon's base accuracy when targeting this body part
+    blood_loss_modifier: float  # how much hp is lost per turn when this body part is wounded. E.g. head wounds cause more bleeding than arm wounds.
+    healing_time_modifier: float
     char: str
 
     def get_color(self) -> Color:
@@ -59,7 +61,18 @@ class Actor:
     dexterity: int = 5 # affects accuracy and evasion
     constitution: int = 5 # affects hp and survivability
 
-    body_parts: List[BodyPart] = None
+    body_parts: List[BodyPart] = field(default_factory=lambda: [
+        BodyPart("Head", hp=10, hp_max=10, hit_chance_modifier=20, blood_loss_modifier=0.5, healing_time_modifier=2.0, char="O"),
+        BodyPart("Neck", hp=5, hp_max=20, hit_chance_modifier=-30, blood_loss_modifier=2, healing_time_modifier=0.2, char="|"),
+        BodyPart("Torso", hp=20, hp_max=20, hit_chance_modifier=-10, blood_loss_modifier=1.0, healing_time_modifier=1.0, char="X"),
+        BodyPart("Left Arm", hp=10, hp_max=10, hit_chance_modifier=-20, blood_loss_modifier=0.8, healing_time_modifier=0.8, char="-"),
+        BodyPart("Right Arm", hp=10, hp_max=10, hit_chance_modifier=-20, blood_loss_modifier=0.8, healing_time_modifier=0.8, char="-"),
+        BodyPart("Left Hand", hp=5, hp_max=5, hit_chance_modifier=-40, blood_loss_modifier=0.3, healing_time_modifier=0.5, char="B"),
+        BodyPart("Right Hand", hp=10, hp_max=10, hit_chance_modifier=-20, blood_loss_modifier=0.8, healing_time_modifier=0.8, char="B"),
+        BodyPart("Left Leg", hp=10, hp_max=10, hit_chance_modifier=-20, blood_loss_modifier=0.8, healing_time_modifier=0.8, char="/"),
+        BodyPart("Right Leg", hp=10, hp_max=10, hit_chance_modifier=-20, blood_loss_modifier=0.8, healing_time_modifier=0.8, char="\\"),
+        BodyPart("Left Foot", hp=5, hp_max=5, hit_chance_modifier=-40, blood_loss_modifier=0.3, healing_time_modifier=0.5, char="_"),
+        BodyPart("Right Foot", hp=5, hp_max=5, hit_chance_modifier=-40, blood_loss_modifier=0.3, healing_time_modifier=0.5, char="_")])
 
     def can_reload(self) -> bool:
         return self.alive and self.ammo_in_mag < self.weapon.mag_size and self.ammo_reserve > 0

@@ -840,6 +840,31 @@ class Engine:
 
         self.draw_section_divider(con, status_x, status_y + status_h//2 - 4, status_w, "Body")
 
+        paperdoll_head = sel.body_parts[0]
+        paperdoll_neck = sel.body_parts[1]
+        paperdoll_torso = sel.body_parts[2]
+        paperdoll_left_arm = sel.body_parts[3]
+        paperdoll_right_arm = sel.body_parts[4]
+        paperdoll_left_hand = sel.body_parts[5]
+        paperdoll_right_hand = sel.body_parts[6]
+        paperdoll_left_leg = sel.body_parts[7]
+        paperdoll_right_leg = sel.body_parts[8]
+        paperdoll_left_foot = sel.body_parts[9]
+        paperdoll_right_foot = sel.body_parts[10]
+
+        paperdoll_y = (status_y + status_h//2 - 3) + 3
+        con.print(status_x + status_w//2, paperdoll_y, f"{paperdoll_head.char}", fg=fg, bg=bg)
+        con.print(status_x + status_w//2, paperdoll_y + 1, f"{paperdoll_neck.char}", fg=fg, bg=bg)
+        con.print(status_x + status_w//2 - 1, paperdoll_y + 2, f"{paperdoll_left_arm.char}", fg=fg, bg=bg)
+        con.print(status_x + status_w//2 + 1, paperdoll_y + 2, f"{paperdoll_right_arm.char}", fg=fg, bg=bg)
+        con.print(status_x + status_w//2, paperdoll_y + 3, f"{paperdoll_torso.char}", fg=fg, bg=bg)
+        con.print(status_x + status_w//2 - 2, paperdoll_y + 2, f"{paperdoll_left_hand.char}", fg=fg, bg=bg)
+        con.print(status_x + status_w//2 + 2, paperdoll_y + 2, f"{paperdoll_right_hand.char}", fg=fg, bg=bg)
+        con.print(status_x + status_w//2 - 1, paperdoll_y + 5, f"{paperdoll_left_leg.char}", fg=fg, bg=bg)
+        con.print(status_x + status_w//2 + 1, paperdoll_y + 5, f"{paperdoll_right_leg.char}", fg=fg, bg=bg)
+        con.print(status_x + status_w//2 - 2, paperdoll_y + 6, f"{paperdoll_left_foot.char}", fg=fg, bg=bg)
+        con.print(status_x + status_w//2 + 2, paperdoll_y + 6, f"{paperdoll_right_foot.char}", fg=fg, bg=bg)
+
         description = getattr(sel, "description", "No description yet.")
         desc_lines = textwrap.wrap(description, desc_w - 2)
         ty = desc_y + 1
@@ -915,6 +940,5 @@ class Engine:
                     con.print(equip_x + 1, ty, f"- {name}"[: equip_w - 2], fg=fg, bg=bg)
                     ty += 1
 
-        # TODO: Paperdoll simbolizing wounds on the body
 
 
