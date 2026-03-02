@@ -18,6 +18,8 @@ from utils import *
 
 from enum import Enum, auto
 
+from name_generation import *
+
 class UIState(Enum):
     PLAY = auto()
     CHAR_SHEET = auto()
@@ -99,14 +101,20 @@ class Engine:
     def setup_demo_match(self) -> None:
         w, h = self.game_map.w, self.game_map.h
 
-        self.actors.append(Actor(0, w // 2 - 3, 3, "Def-1", ord("D"), (120, 180, 255), 10, 10, RIFLE, 6, 12))
-        self.actors.append(Actor(0, w // 2, 2, "Def-2", ord("D"), (120, 180, 255), 10, 10, SMG, 10, 10))
-        self.actors.append(Actor(0, w // 2 + 3, 4, "Def-3", ord("D"), (120, 180, 255), 10, 10, SNIPER, 4, 8))
+        rand_data = generate_random_soldier_info()
+        self.actors.append(Actor(0, w // 2 - 3, 3, ord("D"), (120, 180, 255), 10, 10, RIFLE, 6, 12, **rand_data))
+        rand_data = generate_random_soldier_info()
+        self.actors.append(Actor(0, w // 2, 2, ord("D"), (120, 180, 255), 10, 10, SMG, 10, 10, **rand_data))
+        rand_data = generate_random_soldier_info()
+        self.actors.append(Actor(0, w // 2 + 3, 4, ord("D"), (120, 180, 255), 10, 10, SNIPER, 4, 8, **rand_data))
 
         y0 = h - 10
-        self.actors.append(Actor(1, w // 2 - 3, y0, "Atk-1", ord("A"), (255, 180, 120), 10, 10, RIFLE, 6, 12))
-        self.actors.append(Actor(1, w // 2, y0 + 1, "Atk-2", ord("A"), (255, 180, 120), 10, 10, SMG, 10, 10))
-        self.actors.append(Actor(1, w // 2 + 3, y0, "Atk-3", ord("A"), (255, 180, 120), 10, 10, SNIPER, 4, 8))
+        rand_data = generate_random_soldier_info()
+        self.actors.append(Actor(1, w // 2 - 3, y0, ord("A"), (255, 180, 120), 10, 10, RIFLE, 6, 12, **rand_data))
+        rand_data = generate_random_soldier_info()
+        self.actors.append(Actor(1, w // 2, y0 + 1, ord("A"), (255, 180, 120), 10, 10, SMG, 10, 10, **rand_data))
+        rand_data = generate_random_soldier_info()
+        self.actors.append(Actor(1, w // 2 + 3, y0, ord("A"), (255, 180, 120), 10, 10, SNIPER, 4, 8, **rand_data))
 
         self.team_ap[0] = self.team_ap_max
         self.team_ap[1] = self.team_ap_max
@@ -117,6 +125,10 @@ class Engine:
             self.aim_x, self.aim_y = sel.x, sel.y
 
         self.log.add("Controls: Arrows move | Tab cycle | F aim/fire | R reload | G pickup | Space end turn | Esc quit")
+        self.eating_names = [
+            "eat", "devour", "binge on", "feast on", "wolf down", "shovel in", "choke on", "suck on", "nom on", "gorge on", "snarf down", "inhale", "scarf down"
+        ]
+        self.eating_name = ""
 
     def alive_actors(self) -> List[Actor]:
         return [a for a in self.actors if a.alive]
@@ -191,14 +203,14 @@ class Engine:
 
         if imp.impact_type == "actor" and imp.actor and imp.actor.alive:
             imp.actor.take_damage(imp.damage)
-            self.log.add(f"{imp.shooter_obj.name} shoots and hits {imp.actor.name} for {imp.damage} damage! (Acc: {imp.acc}%, Roll: {imp.roll})")
+            self.log.add(f"{imp.shooter_obj.get_short_name()} shoots and hits {imp.actor.get_short_name()} for {imp.damage} damage! (Acc: {imp.acc}%, Roll: {imp.roll})")
 
             friendly_fire = imp.shooter_obj.team_id == imp.actor.team_id
             if friendly_fire:
-                self.log.add(f"Friendly fire from {imp.actor.name}! Idiot!")
+                self.log.add(f"Friendly fire from {imp.actor.get_short_name()}! Idiot!")
 
             if not imp.actor.alive:
-                self.log.add(f"{imp.actor.name} is down!")
+                self.log.add(f"{imp.actor.get_short_name()} is down!")
                 if not friendly_fire:
                     self._check_victory()
                 else:
@@ -210,12 +222,12 @@ class Engine:
             x, y = imp.tile_xy
             if self.game_map.tile_at(x, y) == DOOR:
                 self.game_map.set_tile(x, y, SAND)
-                self.log.add(f"{imp.shooter_obj.name} blows open the door!")
+                self.log.add(f"{imp.shooter_obj.get_short_name()} blows open the door!")
             else:
-                self.log.add(f"{imp.shooter_obj.name} hits {self.game_map.tile_at(x,y).name}.")
+                self.log.add(f"{imp.shooter_obj.get_short_name()} hits {self.game_map.tile_at(x,y).name}.")
             return
 
-        self.log.add(f"{imp.shooter_obj.name} fires.")
+        self.log.add(f"{imp.shooter_obj.get_short_name()} fires.")
 
     def is_bullet_animation_active(self) -> bool:
         return len(self.bullet_path) > 0
@@ -281,6 +293,7 @@ class Engine:
 
         if ev.sym == tcod.event.KeySym.C:
             if self.get_selected_actor():
+                self.eating_name = random.choice(self.eating_names)
                 self.ui_mode = UIState.CHAR_SHEET
                 self.sheet_tab = SheetTab.OVERVIEW
                 self.sheet_scroll = 0
@@ -400,7 +413,7 @@ class Engine:
             nx, ny = sel.x + dx, sel.y + dy
             if self.game_map.tile_at(nx, ny) == DOOR:
                 self.game_map.set_tile(nx, ny, SAND)
-                self.log.add(f"{sel.name} opens the door.")
+                self.log.add(f"{sel.get_short_name()} opens the door.")
                 return
 
         self.log.add("No door adjacent to open.")
@@ -421,7 +434,7 @@ class Engine:
             return
 
         loaded = sel.reload()
-        self.log.add(f"{sel.name} reloads (+{loaded}).")
+        self.log.add(f"{sel.get_short_name()} reloads (+{loaded}).")
 
     def try_pickup(self) -> None:
         sel = self.get_selected_actor()
@@ -436,11 +449,11 @@ class Engine:
 
         if it.kind == "ammo":
             sel.ammo_reserve += it.amount
-            self.log.add(f"{sel.name} picks up ammo (+{it.amount}).")
+            self.log.add(f"{sel.get_short_name()} picks up ammo (+{it.amount}).")
         elif it.kind == "med":
             before = sel.hp
             sel.hp = min(sel.hp_max, sel.hp + it.amount)
-            self.log.add(f"{sel.name} uses medkit (+{sel.hp - before} HP).")
+            self.log.add(f"{sel.get_short_name()} uses medkit (+{sel.hp - before} HP).")
 
         self.items.remove(it)
 
@@ -541,7 +554,7 @@ class Engine:
         if not is_hit:
             # offset the bullet path (tx,ty) taking accuracy into account when the roll <= acc
             bx, by = self.pick_miss_endpoint(shooter.x, shooter.y, tx, ty, acc, self.game_map.w, self.game_map.h)
-            self.log.add(f"{shooter.name}'s hand shakes!")
+            self.log.add(f"{shooter.get_short_name()}'s hand shakes!")
 
         line = tcod.los.bresenham((shooter.x, shooter.y), (bx, by)).tolist()
         path: List[Tuple[int, int]] = []
@@ -604,34 +617,6 @@ class Engine:
                 roll=to_hit_roll,
                 is_hit_roll=is_hit
             )
-
-        # Allow blowing up doors
-        # if not target: #or target.team_id == shooter.team_id:
-        #     if self.game_map.tile_at(tx, ty) == DOOR:
-        #         self.game_map.set_tile(tx, ty, SAND)
-        #         self.log.add(f"{shooter.name} shoots and blows open the door!")
-        #     else:
-        #         self.log.add(f"{shooter.name} fires.")
-        # else:
-        #     friendly_fire = target.team_id == shooter.team_id
-        #     if friendly_fire:
-        #         self.log.add(f"Friendly fire from {shooter.name}! Idiot!")
-
-        #     if to_hit_roll <= acc:
-        #         target.take_damage(shooter.weapon.damage)
-        #         self.log.add(f"{shooter.name} hits {target.name} ({shooter.weapon.damage} dmg) [{to_hit_roll} <= {acc}]")
-        #         if not target.alive:
-        #             self.log.add(f"{target.name} is DOWN!")
-        #             if not friendly_fire:
-        #                 self._check_victory()
-        #             else:
-        #                 # choose random insult for friendly fire
-        #                 insults = ["Fucking cretin!", "Bro wtf", "Open your fucking eyes maybe??", "What the fuck, it was his birthday!"]
-        #                 self.log.add(f"{random.choice(insults)}")
-        #     else:
-        #         self.log.add(f"{shooter.name} misses {target.name} [{to_hit_roll} > {acc}]")
-        #         if friendly_fire:
-        #             self.log.add(f"{target.name}: Bro you nearly fucking shot me")
 
     # ----------------- Crates -----------------
     def spawn_random_crate(self) -> None:
@@ -750,7 +735,7 @@ class Engine:
                 con.print(
                     r.x + 2,
                     y,
-                    f"{a.name:6} HP {a.hp:2}/{a.hp_max:2}  {a.ammo_in_mag:2}/{a.weapon.mag_size:2}+{a.ammo_reserve:2}",
+                    f"{a.get_short_name():6} HP {a.hp:2}/{a.hp_max:2} {a.ammo_in_mag:2}/{a.weapon.mag_size:2}+{a.ammo_reserve:2}",
                     fg=fg,
                 )
                 y += 1
@@ -865,7 +850,10 @@ class Engine:
         con.print(status_x + status_w//2 - 2, paperdoll_y + 6, f"{paperdoll_left_foot.char}", fg=fg, bg=bg)
         con.print(status_x + status_w//2 + 2, paperdoll_y + 6, f"{paperdoll_right_foot.char}", fg=fg, bg=bg)
 
-        description = getattr(sel, "description", "No description yet.")
+        description = "Priv. " + sel.rank + " " + sel.name + " is proudly: " + sel.nationality + ".\n"
+        description += "They like to " + self.eating_name + " " + sel.favorite_dish + ".\n"
+        description += "They think that " + sel.favorite_sentence.lower() + "."
+
         desc_lines = textwrap.wrap(description, desc_w - 2)
         ty = desc_y + 1
         for line in desc_lines[: desc_h - 2]:

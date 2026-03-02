@@ -5,7 +5,6 @@ from typing import List, Tuple, Optional
 
 Color = Tuple[int, int, int]
 
-
 @dataclass
 class Weapon: # move it to the item.py, as weapons will drop upon death, and can be picked up by other actors.
     name: str
@@ -42,7 +41,6 @@ class Actor:
     team_id: int  # 0 defenders, 1 attackers
     x: int
     y: int
-    name: str
 
     ch: int
     fg: Color
@@ -53,6 +51,16 @@ class Actor:
     weapon: Weapon
     ammo_in_mag: int
     ammo_reserve: int
+
+    name: str
+    rank: str
+    nationality: str
+    political_views: str
+    title: str
+    university: str
+    worldview: str
+    favorite_sentence: str
+    favorite_dish: str
 
     alive: bool = True
 
@@ -97,3 +105,6 @@ class Actor:
 
     def is_enemy_of(self, other: "Actor") -> bool:
         return self.team_id != other.team_id
+
+    def get_short_name(self) -> str:
+        return self.name.split()[0]  # first name only, for compact display on the map
