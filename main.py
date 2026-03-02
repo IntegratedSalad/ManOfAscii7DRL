@@ -6,7 +6,7 @@ from screen import ScreenLayout
 from pathlib import Path
 
 THIS_DIR = Path(__file__) / '..' # Directory of this script file
-FONT = THIS_DIR / "assets/curses.png"  # Replace with any tileset from the DF tileset repository
+FONT = THIS_DIR / "assets/Unknown_curses_12x12.png"  # Replace with any tileset from the DF tileset repository
 
 print(FONT.resolve())
 def main() -> None:

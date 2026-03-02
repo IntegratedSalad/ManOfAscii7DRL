@@ -16,6 +16,18 @@ import textwrap
 
 from utils import *
 
+from enum import Enum, auto
+
+class UIState(Enum):
+    PLAY = auto()
+    CHAR_SHEET = auto()
+
+class SheetTab(Enum):
+    OVERVIEW = auto()
+    INVENTORY = auto()
+    WOUNDS = auto()
+    BIO = auto()
+
 ImpactType = Literal["actor", "tile", "none"]
 
 @dataclass
@@ -23,7 +35,7 @@ class PendingImpact:
     impact_type: ImpactType
     actor: Optional[Actor]
     tile_xy: Optional[Tuple[int, int]]
-    shooter_name: str
+    shooter_obj: Actor
     damage: int
     acc: int
     roll: int
@@ -52,6 +64,10 @@ class Engine:
         self.game_map = game_map
         self.layout = layout
 
+        self.ui_mode = UIState.PLAY
+        self.sheet_tab = SheetTab.OVERVIEW
+        self.sheet_scroll = 0
+
         self.actors: List[Actor] = []
         self.items: List[Item] = []
 
@@ -65,8 +81,8 @@ class Engine:
         self.running = True
 
         self.current_team: int = 1  # 1 attackers start, 0 defenders
-        self.team_ap = {0: 10, 1: 10}
-        self.team_ap_max = 10
+        self.team_ap = {0: 20, 1: 20}
+        self.team_ap_max = 20
 
         self.selected_index: int = 0  # index within filtered list of current team alive actors
 
@@ -175,9 +191,9 @@ class Engine:
 
         if imp.impact_type == "actor" and imp.actor and imp.actor.alive:
             imp.actor.take_damage(imp.damage)
-            self.log.add(f"{imp.shooter_name} shoots and hits {imp.actor.name} for {imp.damage} damage! (Acc: {imp.acc}%, Roll: {imp.roll})")
+            self.log.add(f"{imp.shooter_obj.name} shoots and hits {imp.actor.name} for {imp.damage} damage! (Acc: {imp.acc}%, Roll: {imp.roll})")
 
-            friendly_fire = imp.actor.team_id == imp.actor.team_id
+            friendly_fire = imp.shooter_obj.team_id == imp.actor.team_id
             if friendly_fire:
                 self.log.add(f"Friendly fire from {imp.actor.name}! Idiot!")
 
@@ -194,13 +210,12 @@ class Engine:
             x, y = imp.tile_xy
             if self.game_map.tile_at(x, y) == DOOR:
                 self.game_map.set_tile(x, y, SAND)
-                self.log.add(f"{imp.shooter_name} blows open the door!")
+                self.log.add(f"{imp.shooter_obj.name} blows open the door!")
             else:
-                self.log.add(f"{imp.shooter_name} hits {self.game_map.tile_at(x,y).name}.")
+                self.log.add(f"{imp.shooter_obj.name} hits {self.game_map.tile_at(x,y).name}.")
             return
 
-        self.log.add(f"{imp.shooter_name} fires.")
-
+        self.log.add(f"{imp.shooter_obj.name} fires.")
 
     def is_bullet_animation_active(self) -> bool:
         return len(self.bullet_path) > 0
@@ -217,12 +232,34 @@ class Engine:
             # optional: could set aim cursor from mouse if you want later
             pass
 
+    def _handle_sheet_keydown(self, ev: tcod.event.KeyDown) -> None:
+        if ev.sym == tcod.event.KeySym.ESCAPE:
+            self.ui_mode = UIState.PLAY
+            return
+        # scrolling
+        if ev.sym == tcod.event.KeySym.UP:
+            self.sheet_scroll = max(0, self.sheet_scroll - 1)
+        elif ev.sym == tcod.event.KeySym.DOWN:
+            self.sheet_scroll += 1
+        elif ev.sym == tcod.event.KeySym.PAGEUP:
+            self.sheet_scroll = max(0, self.sheet_scroll - 10)
+        elif ev.sym == tcod.event.KeySym.PAGEDOWN:
+            self.sheet_scroll += 10
+        # maybe render everything onto one tab
+
     def _handle_keydown(self, ev: tcod.event.KeyDown) -> None:
 
         if self.is_bullet_animation_active():
             return
 
+        if self.ui_mode == UIState.CHAR_SHEET:
+            self._handle_sheet_keydown(ev)
+            return
+
         if ev.sym == tcod.event.KeySym.ESCAPE:
+            if self.ui_mode == UIState.CHAR_SHEET:
+                self.ui_mode = UIState.PLAY
+                return
             if self.aiming:
                 self.aiming = False
                 self.log.add("Aiming cancelled.")
@@ -240,6 +277,13 @@ class Engine:
 
         if ev.sym == tcod.event.KeySym.O:
             self.try_open_door()
+            return
+
+        if ev.sym == tcod.event.KeySym.C:
+            if self.get_selected_actor():
+                self.ui_mode = UIState.CHAR_SHEET
+                self.sheet_tab = SheetTab.OVERVIEW
+                self.sheet_scroll = 0
             return
 
         dx, dy = 0, 0
@@ -532,7 +576,7 @@ class Engine:
                 impact_type="actor",
                 actor=impact_actor,
                 tile_xy=None,
-                shooter_name=shooter.name,
+                shooter_obj=shooter,
                 damage=shooter.weapon.damage,
                 acc=acc,
                 roll=to_hit_roll,
@@ -543,7 +587,7 @@ class Engine:
                 impact_type="tile",
                 actor=None,
                 tile_xy=impact_tile,
-                shooter_name=shooter.name,
+                shooter_obj=shooter,
                 damage=0,
                 acc=acc,
                 roll=to_hit_roll,
@@ -554,7 +598,7 @@ class Engine:
                 impact_type="none",
                 actor=None,
                 tile_xy=None,
-                shooter_name=shooter.name,
+                shooter_obj=shooter,
                 damage=0,
                 acc=acc,
                 roll=to_hit_roll,
@@ -617,6 +661,9 @@ class Engine:
         self._render_equip_panel(con)
         self._render_log_panel(con)
 
+        if self.ui_mode == UIState.CHAR_SHEET:
+            self._render_character_sheet(con)
+
     def _render_map(self, con: tcod.Console) -> None:
         r = self.layout.map_rect
 
@@ -661,6 +708,15 @@ class Engine:
             con.print(r.x + bx, r.y + by, "*", fg=(255, 220, 100))
 
         con.print(r.x + 1, r.y + 0, f"Team: {'ATK' if self.current_team==1 else 'DEF'}  AP: {self.team_ap[self.current_team]}/{self.team_ap_max}", fg=(220, 220, 220))
+
+    def draw_section_divider(self, con, x, y, width, title, fg=(180,180,180), bg=(0,0,0)):
+        line_chr = '═'
+        text = f" {title} "
+        remaining = width - len(text)-1
+        left = 1 + remaining // 2
+        right = remaining - left - 1
+        line = line_chr * left + text + line_chr * right
+        con.print(x+1, y, line[:width], fg=fg, bg=bg)
 
     def _panel_frame(self, con: tcod.Console, x: int, y: int, w: int, h: int, title: str) -> None:
         fg = (160, 160, 160)
@@ -733,3 +789,132 @@ class Engine:
         for line in lines:
             con.print(r.x + 1, y, line[: r.w - 2], fg=(200, 200, 200))
             y += 1
+
+    def _render_character_sheet(self, con: tcod.Console) -> None:
+        sel = self.get_selected_actor()
+        if not sel:
+            return
+
+        x, y = 1, 2
+        w, h = self.layout.screen_w - 2, self.layout.screen_h - 2
+
+        fg = (220, 220, 220)
+        dim = (40, 40, 40)
+        bg = (0, 0, 0)
+
+        con.draw_rect(0, 0, self.layout.screen_w, self.layout.screen_h, ch=ord(' '), bg=dim, bg_blend=tcod.BKGND_MULTIPLY)
+
+        header = f" {sel.name}  ({'ATK' if sel.team_id==1 else 'DEF'})  |  ESC/C: close  TAB: next soldier "
+        con.print(x + 2, y+1, header[: w - 4], fg=fg, bg=bg)
+        self._panel_frame(con, x, y, w, h, "Character Sheet")
+
+        inner_x = x + 1
+        inner_y = y + 2
+        inner_w = w - 2
+        inner_h = h - 3
+
+        gap = 1
+        left_w = int(inner_w * 0.62)
+        right_w = inner_w - left_w - gap
+
+        left_x = inner_x
+        right_x = inner_x + left_w + gap
+
+        desc_h = int(inner_h * 0.55)
+        equip_h = inner_h - desc_h - gap
+
+        desc_x, desc_y, desc_w = left_x, inner_y, left_w
+        equip_x, equip_y, equip_w = left_x, inner_y + desc_h + gap, left_w
+
+        attr_h = max(6, int(inner_h * 0.24))
+        status_h = inner_h - attr_h
+
+        attr_x, attr_y, attr_w = right_x, inner_y, right_w
+        status_x, status_y, status_w = right_x, attr_h + gap + 3, right_w
+
+        self._panel_frame(con, desc_x, desc_y, desc_w, desc_h, "Description")
+        self._panel_frame(con, equip_x, equip_y, equip_w, equip_h, "Equipment")
+
+        self._panel_frame(con, attr_x, attr_y, attr_w, attr_h, "Attributes")
+        self._panel_frame(con, status_x, status_y, status_w, status_h, "Status")
+
+        self.draw_section_divider(con, status_x, status_y + status_h//2 - 4, status_w, "Body")
+
+        description = getattr(sel, "description", "No description yet.")
+        desc_lines = textwrap.wrap(description, desc_w - 2)
+        ty = desc_y + 1
+        for line in desc_lines[: desc_h - 2]:
+            con.print(desc_x + 1, ty, line, fg=fg, bg=bg)
+            ty += 1
+
+        armor = getattr(sel, "armor", None)
+
+        STR = getattr(sel, "str", getattr(sel, "strength", 0))
+        DEX = getattr(sel, "dex", getattr(sel, "dexterity", 0))
+        CON = getattr(sel, "con", getattr(sel, "constitution", 0))
+
+        con.print(attr_x + 1, attr_y + 1, f"STR: {STR}", fg=fg, bg=bg)
+        con.print(attr_x + 1, attr_y + 2, f"DEX: {DEX}", fg=fg, bg=bg)
+        con.print(attr_x + 1, attr_y + 3, f"CON: {CON}", fg=fg, bg=bg)
+
+        dex_bonus = getattr(sel, "dex_bonus", 0)
+        if attr_h >= 6:
+            con.print(attr_x + 1, attr_y + 5, f"Dex bonus: {dex_bonus}", fg=(180, 180, 180), bg=bg)
+
+        health_x = status_x
+        health_y = status_y + 1
+        health_w = right_w
+
+        bar_w = max(10, health_w - 10)
+        filled = 0 if sel.hp_max <= 0 else int((sel.hp / sel.hp_max) * bar_w)
+        filled = max(0, min(bar_w, filled))
+        con.draw_rect(x=health_x+1, y=health_y + 1, width=bar_w, height=1, ch=1, bg=(150, 0, 0))
+        con.draw_rect(x=health_x+1, y=health_y + 1, width=filled, height=1, ch=1, bg=(0, 150, 0))
+        con.print(health_x + 1, health_y + 1, f"HP: {sel.hp}/{sel.hp_max}", fg=fg,)
+
+        statuses = getattr(sel, "statuses", getattr(sel, "wounds", []))
+        if not statuses:
+            con.print(status_x + 1, status_y + 3, "(none)", fg=(140, 140, 140), bg=bg)
+        else:
+            ty = status_y + 1
+            for s in statuses[: status_h - 2]:
+                con.print(status_x + 1, ty, f"- {s}"[: status_w - 2], fg=fg, bg=bg)
+                ty += 1
+
+        con.print(equip_x + 1, equip_y + 1, f"Weapon: {sel.weapon.name}", fg=fg, bg=bg)
+        con.print(
+            equip_x + 1,
+            equip_y + 2,
+            f"Ammo: {sel.ammo_in_mag}/{sel.weapon.mag_size} +{sel.ammo_reserve}",
+            fg=fg,
+            bg=bg,
+        )
+
+        eq = getattr(sel, "equipment", {})
+        inv = getattr(sel, "inventory", [])
+
+        slot_y = equip_y + 4
+        if eq and equip_h >= 10:
+            con.print(equip_x + 1, slot_y, "Slots:", fg=(180, 180, 180), bg=bg)
+            slot_y += 1
+            for slot in ["head", "body", "hands", "legs"]:
+                val = eq.get(slot, None)
+                name = getattr(val, "name", str(val)) if val else "(empty)"
+                con.print(equip_x + 1, slot_y, f"{slot:>5}: {name}"[: equip_w - 2], fg=fg, bg=bg)
+                slot_y += 1
+
+        inv_title_y = max(slot_y + 1, equip_y + 8)
+        if inv_title_y < equip_y + equip_h - 1:
+            con.print(equip_x + 1, inv_title_y, "Inventory:", fg=(180, 180, 180), bg=bg)
+            ty = inv_title_y + 1
+            if not inv:
+                con.print(equip_x + 1, ty, "(empty)", fg=(140, 140, 140), bg=bg)
+            else:
+                for it in inv[: (equip_y + equip_h - 1) - ty]:
+                    name = getattr(it, "name", str(it))
+                    con.print(equip_x + 1, ty, f"- {name}"[: equip_w - 2], fg=fg, bg=bg)
+                    ty += 1
+
+        # TODO: Paperdoll simbolizing wounds on the body
+
+

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple, Optional
+from typing import List, Tuple, Optional
 
 Color = Tuple[int, int, int]
 
@@ -19,6 +19,21 @@ RIFLE = Weapon("Rifle", range=12, base_accuracy=70, damage=3, mag_size=6)
 SMG = Weapon("SMG", range=8, base_accuracy=65, damage=2, mag_size=10)
 SNIPER = Weapon("Sniper", range=16, base_accuracy=80, damage=4, mag_size=4)
 
+@dataclass
+class BodyPart:
+    name: str
+    hp: int
+    hp_max: int
+    hit_chance_modifier: int  # percent, added to the weapon's base accuracy when targeting this body part
+    char: str
+
+    def get_color(self) -> Color:
+        # Return a color based on hp percentage. Green when healthy, red when damaged.
+        ratio = self.hp / self.hp_max if self.hp_max > 0 else 0
+        r = int(255 * (1 - ratio))
+        g = int(255 * ratio)
+        b = 0
+        return (r, g, b)
 
 @dataclass
 class Actor:
@@ -38,6 +53,13 @@ class Actor:
     ammo_reserve: int
 
     alive: bool = True
+
+    # slight bonus to damage. This is the base ability to how easily wounded the soldier can be
+    strength: int = 5
+    dexterity: int = 5 # affects accuracy and evasion
+    constitution: int = 5 # affects hp and survivability
+
+    body_parts: List[BodyPart] = None
 
     def can_reload(self) -> bool:
         return self.alive and self.ammo_in_mag < self.weapon.mag_size and self.ammo_reserve > 0
