@@ -10,7 +10,7 @@ import tcod.event
 
 from actor import Actor, RIFLE, SMG, SNIPER
 from item import Item
-from map import SAND, GameMap, ROCK, DOOR
+from map import SAND, TREE, GameMap, ROCK, DOOR
 from screen import ScreenLayout
 import textwrap
 
@@ -764,9 +764,14 @@ class Engine:
 
         # Start at victim, go forward
         x, y = vx, vy
+        self.game_map.add_blood(vx, vy, amount=2)
         for i in range(length):
             x += step_x
             y += step_y
+
+            if self.game_map.tile_at(x, y) == DOOR or self.game_map.tile_at(x, y) == ROCK or self.game_map.tile_at(x, y) == TREE:
+                return
+
             if not (0 <= x < self.game_map.w and 0 <= y < self.game_map.h):
                 break
 
@@ -782,7 +787,6 @@ class Engine:
             self.game_map.add_blood(jx, jy, amount=1)
 
         # Extra splat at victim position
-        self.game_map.add_blood(vx, vy, amount=2)
 
     def draw_section_divider(self, con, x, y, width, title, fg=(180,180,180), bg=(0,0,0)):
         line_chr = '═'
