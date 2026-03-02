@@ -44,6 +44,13 @@ class PendingImpact:
     is_hit_roll: bool
 
 @dataclass
+class ColorStr:
+    text: str
+    colorfg: Tuple[int, int, int]
+    colorbg: Tuple[int, int, int]
+    blink: bool = False
+
+@dataclass
 class MessageLog:
     lines: List[str]
     layout: ScreenLayout
@@ -202,9 +209,11 @@ class Engine:
         self.pending_impact = None
 
         if imp.impact_type == "actor" and imp.actor and imp.actor.alive:
-            imp.actor.take_damage(imp.damage)
-            self.log.add(f"{imp.shooter_obj.get_short_name()} shoots and hits {imp.actor.get_short_name()} for {imp.damage} damage! (Acc: {imp.acc}%, Roll: {imp.roll})")
-
+            hit_part = imp.actor.take_hit(imp.damage, imp.acc)
+            self.log.add(
+                f"{imp.shooter_obj.get_short_name()} hits {imp.actor.get_short_name()} ({hit_part.name}) "
+                f"Trauma {imp.damage}, bleed {imp.actor.bleed_rate}/turn."
+    )
             friendly_fire = imp.shooter_obj.team_id == imp.actor.team_id
             if friendly_fire:
                 self.log.add(f"Friendly fire from {imp.actor.get_short_name()}! Idiot!")
@@ -280,6 +289,7 @@ class Engine:
             return
 
         if ev.sym == tcod.event.KeySym.TAB:
+            print(self.get_selected_actor().blood)
             self._cycle_selected(+1)
             return
 
@@ -350,7 +360,28 @@ class Engine:
         if sel:
             self.aim_x, self.aim_y = sel.x, sel.y
 
+    def _tick_team_bleeding(self, team_id: int) -> None:
+        deaths = []
+
+        for a in self.team_actors(team_id):
+            if not a.alive:
+                continue
+
+            loss = a.tick_bleeding()
+            if loss > 0 and not a.alive:
+                deaths.append(a.get_short_name())
+
+        for name in deaths:
+            self.log.add(f"{name} bleeds out!")
+
     def end_turn(self) -> None:
+        # TODO: do this as someone moves, not when next turn!
+        for a in self.alive_actors():
+            loss = a.tick_bleeding()
+            if loss > 0:
+                self.log.add(f"{a.get_short_name()} loses {loss} blood!")
+                if not a.alive:
+                    self.log.add(f"{a.get_short_name()} bleeds out!")
 
         self.aiming = False
         self.current_team = 1 - self.current_team
@@ -372,6 +403,10 @@ class Engine:
         if self.team_ap[self.current_team] < cost:
             self.log.add("Not enough AP.")
             return False
+
+        self._tick_team_bleeding(0)
+        self._tick_team_bleeding(1)
+
         self.team_ap[self.current_team] -= cost
         return True
 
@@ -789,8 +824,8 @@ class Engine:
 
         con.draw_rect(0, 0, self.layout.screen_w, self.layout.screen_h, ch=ord(' '), bg=dim, bg_blend=tcod.BKGND_MULTIPLY)
 
-        header = f" {sel.name}  ({'ATK' if sel.team_id==1 else 'DEF'})  |  ESC/C: close  TAB: next soldier "
-        con.print(x + 2, y+1, header[: w - 4], fg=fg, bg=bg)
+        header = f" {sel.name} ({'ATK' if sel.team_id==1 else 'DEF'})  |  ESC/C: close"
+        con.print(x + 2, y+1, header[: w - 4], fg=(255, 215, 0), bg=bg)
         self._panel_frame(con, x, y, w, h, "Character Sheet")
 
         inner_x = x + 1
@@ -878,21 +913,29 @@ class Engine:
         health_y = status_y + 1
         health_w = right_w
 
-        bar_w = max(10, health_w - 10)
-        filled = 0 if sel.hp_max <= 0 else int((sel.hp / sel.hp_max) * bar_w)
+        bar_w = max(2, health_w - 10)
+        filled = 0 if sel.blood <= 0 else int((sel.blood / sel.blood_max) * bar_w)
         filled = max(0, min(bar_w, filled))
-        con.draw_rect(x=health_x+1, y=health_y + 1, width=bar_w, height=1, ch=1, bg=(150, 0, 0))
-        con.draw_rect(x=health_x+1, y=health_y + 1, width=filled, height=1, ch=1, bg=(0, 150, 0))
-        con.print(health_x + 1, health_y + 1, f"HP: {sel.hp}/{sel.hp_max}", fg=fg,)
-
-        statuses = getattr(sel, "statuses", getattr(sel, "wounds", []))
-        if not statuses:
-            con.print(status_x + 1, status_y + 3, "(none)", fg=(140, 140, 140), bg=bg)
+        con.draw_rect(x=health_x+1, y=health_y + 1, width=bar_w, height=1, ch=1, bg=(70, 0, 0))
+        con.draw_rect(x=health_x+1, y=health_y + 1, width=filled, height=1, ch=1, bg=(245, 0, 0))
+        con.print(health_x + 1, health_y + 1, f"Blood: {sel.blood}/{sel.blood_max}", fg=fg, bg=(245, 0, 0))
+        statuses = []
+        bleed_severity = 0
+        severity_color_map = {0: (245, 245, 0), 1: (180, 0, 0), 2: (240, 0, 0)}
+        if sel.bleed_rate > 0:
+            if sel.bleed_rate >= 5:
+                statuses.append(f"Severe bleeding! ({sel.bleed_rate} HP/tick)")
+                bleed_severity = 1
+            elif sel.bleed_rate >= 10:
+                statuses.append(f"Critical bleeding! ({sel.bleed_rate} HP/tick)")
+                bleed_severity = 2
+            else:
+                statuses.append(f"Bleeding! ({sel.bleed_rate} HP/tick)")
+        if len(statuses) < 1:
+            con.print(status_x + 1, status_y + 3, "Healthy!", fg=(0, 180, 0), bg=(0,50,0))
         else:
-            ty = status_y + 1
-            for s in statuses[: status_h - 2]:
-                con.print(status_x + 1, ty, f"- {s}"[: status_w - 2], fg=fg, bg=bg)
-                ty += 1
+            bleeding_status = statuses[0]
+            con.print(status_x + 1, status_y + 3, bleeding_status[:status_w-2], fg=severity_color_map[bleed_severity], bg=(80,0,0))
 
         con.print(equip_x + 1, equip_y + 1, f"Weapon: {sel.weapon.name}", fg=fg, bg=bg)
         con.print(
@@ -927,6 +970,3 @@ class Engine:
                     name = getattr(it, "name", str(it))
                     con.print(equip_x + 1, ty, f"- {name}"[: equip_w - 2], fg=fg, bg=bg)
                     ty += 1
-
-
-

@@ -72,4 +72,6 @@ def main() -> None:
                 time.sleep(FRAME_TIME - elapsed)
 
 if __name__ == "__main__":
+    import sys
+    print(sys.version)
     main()

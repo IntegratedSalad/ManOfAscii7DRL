@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import random
 from typing import List, Tuple, Optional
 
 Color = Tuple[int, int, int]
@@ -28,6 +29,9 @@ class BodyPart:
     healing_time_modifier: float
     char: str
 
+    wounded: bool = False
+    broken: bool = False
+
     def get_color(self) -> Color:
         # Return a color based on hp percentage. Green when healthy, red when damaged.
         ratio = self.hp / self.hp_max if self.hp_max > 0 else 0
@@ -35,6 +39,13 @@ class BodyPart:
         g = int(255 * ratio)
         b = 0
         return (r, g, b)
+
+    def damage(self, amount: int) -> None:
+        self.hp = max(0, self.hp - amount)
+        if self.hp < self.hp_max:
+            self.wounded = True
+        if self.hp_max > 0 and (self.hp / self.hp_max) < 0.23:
+            self.broken = True
 
 @dataclass
 class Actor:
@@ -63,6 +74,9 @@ class Actor:
     favorite_dish: str
 
     alive: bool = True
+    blood: int = 100
+    blood_max: int = 100
+    bleed_rate: int = 0
 
     # slight bonus to damage. This is the base ability to how easily wounded the soldier can be
     strength: int = 5
@@ -95,13 +109,73 @@ class Actor:
         self.ammo_reserve -= loaded
         return loaded
 
-    def take_damage(self, dmg: int) -> None:
+    def choose_hit_part(self, acc: int) -> BodyPart:
+        # weights based on hit chance modifier; higher modifier => more likely to be hit
+        # We'll convert modifiers into positive weights.
+        parts = self.body_parts
+        weights = []
+        for p in parts:
+            # Base weight 10 plus (modifier+acc%2)/2, clamped
+            w = 10 + int(p.hit_chance_modifier + acc % 10 / 2)
+            w = max(1, min(30, w))
+            weights.append(w)
+        return random.choices(parts, weights=weights, k=1)[0]
+
+    def apply_blood_loss(self, amount: int) -> None:
         if not self.alive:
             return
-        self.hp -= dmg
-        if self.hp <= 0:
-            self.hp = 0
+        self.blood = max(0, self.blood - max(0, amount))
+        if self.blood <= 0:
             self.alive = False
+
+    def tick_bleeding(self) -> int:
+        if not self.alive:
+            return 0
+        # TODO: Apply constitution. If mitigated, log that is was mitigated by being tough or something.
+        loss = max(0, self.bleed_rate) #- self.constitution//2) # constitution helps mitigate blood loss
+        if loss > 0:
+            print(f"{self.get_short_name()} bleeds for {loss} blood.")
+            self.apply_blood_loss(loss)
+        return loss
+
+    def recalc_bleed_rate_from_parts(self) -> None:
+        rate = 0
+        for p in self.body_parts:
+            if p.wounded and p.hp > 0:
+                severity = 1.0 - (p.hp / p.hp_max if p.hp_max > 0 else 1.0)
+                rate += int(round(p.blood_loss_modifier * (1 + 2 * severity)))
+        self.bleed_rate = max(0, rate)
+
+    def take_hit(self, damage: int, acc: int) -> BodyPart:
+        if not self.alive:
+            return self.body_parts[2]
+
+        part = self.choose_hit_part(acc)
+        part.damage(damage) # strength adds a flat bonus to damage
+        self.apply_blood_loss(damage)
+        self.recalc_bleed_rate_from_parts()
+
+        if part.name in ("Head", "Neck", "Torso") and part.hp == 0:
+            self.alive = False
+            self.blood = 0
+
+        return part
+
+    def get_status_strings(self) -> List[str]:
+        s = []
+        if self.bleed_rate > 0:
+            s.append(f"Bleeding ({self.bleed_rate}/turn)")
+        if any(p.wounded for p in self.body_parts):
+            s.append("Wounded")
+        if any(p.broken and "Arm" in p.name for p in self.body_parts):
+            s.append("Arm broken")
+        if any(p.broken and "Leg" in p.name for p in self.body_parts):
+            s.append("Leg broken")
+        head = next(p for p in self.body_parts if p.name == "Head")
+        neck = next(p for p in self.body_parts if p.name == "Neck")
+        if head.wounded or neck.wounded:
+            s.append("Concussed")
+        return s
 
     def is_enemy_of(self, other: "Actor") -> bool:
         return self.team_id != other.team_id

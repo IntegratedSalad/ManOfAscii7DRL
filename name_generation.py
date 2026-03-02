@@ -8,7 +8,7 @@ import random
 def generate_random_soldier_info() -> dict:
     person = Person(Locale.EN)
     last_name = person.last_name()
-    suffixes = ['bimb', 'bloop', 'ungundes', 'bobowy', 'gloop', 'floof', 'snooncc', 'succ', 'klooc', 'fdoof', 'geschnitzel', 'benpis', 'BRAP']
+    suffixes = ['bimb', 'bloop', 'ungundes', 'bobowy', 'gloop', 'floof', 'snooncc', 'succ', 'klooc', 'fdoof', 'geschnitzel', 'benpis', 'BRAP', 'unc', 'fart', 'shart', 'dundles']
     name = last_name.replace(" ", "") + random.choice(suffixes) + " " + Food().fruit()
     name = name.title()
     rank = person.title()
