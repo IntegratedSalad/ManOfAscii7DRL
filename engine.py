@@ -213,7 +213,7 @@ class Engine:
             self.log.add(
                 f"{imp.shooter_obj.get_short_name()} hits {imp.actor.get_short_name()} ({hit_part.name}) "
                 f"Trauma {imp.damage}, bleed {imp.actor.bleed_rate}/turn."
-    )
+            )
             friendly_fire = imp.shooter_obj.team_id == imp.actor.team_id
             if friendly_fire:
                 self.log.add(f"Friendly fire from {imp.actor.get_short_name()}! Idiot!")
@@ -225,6 +225,14 @@ class Engine:
                 else:
                     insults = ["Fucking cretin!", "Bro wtf", "Open your fucking eyes maybe??", "What the fuck, it was his birthday!"]
                     self.log.add(f"{random.choice(insults)}")
+
+            self._spawn_blood_spurt(
+                sx=imp.shooter_obj.x,
+                sy=imp.shooter_obj.y,
+                vx=imp.actor.x,
+                vy=imp.actor.y,
+                power=max(3, imp.damage * 2)
+            )
             return
 
         if imp.impact_type == "tile" and imp.tile_xy:
@@ -691,7 +699,17 @@ class Engine:
         for y in range(self.game_map.h):
             for x in range(self.game_map.w):
                 t = self.game_map.tile_at(x, y)
-                con.print(x=r.x + x, y=r.y + y, string=chr(t.ch), fg=t.fg, bg=t.bg)
+                if (self.game_map.blood[y][x] > 0):
+                    # blood overlay: red tint with intensity based on blood level
+                    blood_level = self.game_map.blood[y][x]
+                    intensity = min(150, blood_level * 15)  # cap intensity to avoid too dark
+                    _r, _g, _b = t.fg
+                    _r = min(255, _r + intensity)
+                    _g = max(0, _g - intensity)
+                    _b = max(0, _b - intensity)
+                    con.print(x=r.x + x, y=r.y + y, string=chr(t.ch), fg=(_r, _g, _b), bg=(90, 0, 0))
+                else:
+                    con.print(x=r.x + x, y=r.y + y, string=chr(t.ch), fg=t.fg, bg=t.bg)
 
         for it in self.items:
             con.print(r.x + it.x, r.y + it.y, chr(it.ch), fg=it.fg)
@@ -728,6 +746,43 @@ class Engine:
             con.print(r.x + bx, r.y + by, "*", fg=(255, 220, 100))
 
         con.print(r.x + 1, r.y + 0, f"Team: {'ATK' if self.current_team==1 else 'DEF'}  AP: {self.team_ap[self.current_team]}/{self.team_ap_max}", fg=(220, 220, 220))
+
+    def _spawn_blood_spurt(self, sx: int, sy: int, vx: int, vy: int, power: int = 5) -> None:
+        dx = vx - sx
+        dy = vy - sy
+
+        # Normalize direction to a grid step (-1,0,1)
+        step_x = 0 if dx == 0 else (1 if dx > 0 else -1)
+        step_y = 0 if dy == 0 else (1 if dy > 0 else -1)
+
+        # If shot is perfectly aligned weirdly, still ensure movement
+        if step_x == 0 and step_y == 0:
+            return
+
+        # Spray length depends on power; add some randomness
+        length = max(2, min(10, power + random.randint(-1, 2)))
+
+        # Start at victim, go forward
+        x, y = vx, vy
+        for i in range(length):
+            x += step_x
+            y += step_y
+            if not (0 <= x < self.game_map.w and 0 <= y < self.game_map.h):
+                break
+
+            # stop if hits a wall (blood splats there)
+            if self.game_map.blocks_los(x, y):
+                self.game_map.add_blood(x, y, amount=3)
+                break
+
+            # jitter: blood isn't a laser line
+            jx = x + random.randint(-1, 1) if random.random() < 0.35 else x
+            jy = y + random.randint(-1, 1) if random.random() < 0.35 else y
+
+            self.game_map.add_blood(jx, jy, amount=1)
+
+        # Extra splat at victim position
+        self.game_map.add_blood(vx, vy, amount=2)
 
     def draw_section_divider(self, con, x, y, width, title, fg=(180,180,180), bg=(0,0,0)):
         line_chr = '═'

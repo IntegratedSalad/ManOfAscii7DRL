@@ -29,6 +29,7 @@ def main() -> None:
 
     # game_map = GameMap.generate_forest(map_w, map_h)
     game_map = GameMap.generate_beach(map_w, map_h)
+    game_map.set_blood() # initialize blood grid
 
     if type(game_map) == tuple:
         game_map, items = game_map
@@ -48,7 +49,7 @@ def main() -> None:
         layout.screen_w,
         layout.screen_h,
         tileset=tileset,
-        title="7DRL Tactical Beach (tcod)",
+        title="Men Of Ascii (7DRL 2026)",
         vsync=True,
     ) as context:
         root_console = context.new_console(layout.screen_w, layout.screen_h, order="F")

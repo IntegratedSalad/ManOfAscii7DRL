@@ -42,6 +42,8 @@ class GameMap:
     transparent: List[List[bool]]
     walkable: List[List[bool]]
 
+    blood = List[List[int]]
+
     def in_bounds(self, x: int, y: int) -> bool:
         return 0 <= x < self.w and 0 <= y < self.h
 
@@ -61,6 +63,13 @@ class GameMap:
         self.tiles[y][x] = tile
         self.walkable[y][x] = tile.walkable
         self.transparent[y][x] = tile.transparent
+
+    def set_blood(self) -> None:
+        self.blood = [[0 for _ in range(self.w)] for _ in range(self.h)]
+
+    def add_blood(self, x: int, y: int, amount: int) -> None:
+        if self.in_bounds(x, y):
+            self.blood[y][x] = min(100, self.blood[y][x] + amount)
 
     @staticmethod
     def generate_beach(w: int, h: int) -> "GameMap":
