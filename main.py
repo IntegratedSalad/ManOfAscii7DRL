@@ -39,6 +39,7 @@ def main() -> None:
     engine = Engine(game_map=game_map, layout=layout) # TODO: game engine loads next map in maps_data
     engine.items.extend(items)
     engine.setup_demo_match()
+    engine.log.add("Aiming: move cursor with arrows, Enter to shoot, Esc to cancel.")
 
     TARGET_FPS = 60
     FRAME_TIME = 1.0 / TARGET_FPS

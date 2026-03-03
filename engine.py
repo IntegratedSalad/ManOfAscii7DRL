@@ -109,19 +109,19 @@ class Engine:
         w, h = self.game_map.w, self.game_map.h
 
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(0, w // 2 - 3, 3, ord("D"), (120, 180, 255), 10, 10, RIFLE, 6, 12, **rand_data))
+        self.actors.append(Actor(0, w // 2 - 3, 3, ord("☻"), (120, 180, 255), 10, 10, RIFLE, 6, 12, **rand_data))
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(0, w // 2, 2, ord("D"), (120, 180, 255), 10, 10, SMG, 10, 10, **rand_data))
+        self.actors.append(Actor(0, w // 2, 2, ord("☻"), (120, 180, 255), 10, 10, SMG, 10, 10, **rand_data))
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(0, w // 2 + 3, 4, ord("D"), (120, 180, 255), 10, 10, SNIPER, 4, 8, **rand_data))
+        self.actors.append(Actor(0, w // 2 + 3, 4, ord("☻"), (120, 180, 255), 10, 10, SNIPER, 4, 8, **rand_data))
 
         y0 = h - 10
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(1, w // 2 - 3, y0, ord("A"), (255, 180, 120), 10, 10, RIFLE, 6, 12, **rand_data))
+        self.actors.append(Actor(1, w // 2 - 3, y0, ord("☻"), (255, 180, 120), 10, 10, RIFLE, 6, 12, **rand_data))
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(1, w // 2, y0 + 1, ord("A"), (255, 180, 120), 10, 10, SMG, 10, 10, **rand_data))
+        self.actors.append(Actor(1, w // 2, y0 + 1, ord("☻"), (255, 180, 120), 10, 10, SMG, 10, 10, **rand_data))
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(1, w // 2 + 3, y0, ord("A"), (255, 180, 120), 10, 10, SNIPER, 4, 8, **rand_data))
+        self.actors.append(Actor(1, w // 2 + 3, y0, ord("☻"), (255, 180, 120), 10, 10, SNIPER, 4, 8, **rand_data))
 
         self.team_ap[0] = self.team_ap_max
         self.team_ap[1] = self.team_ap_max
@@ -281,6 +281,9 @@ class Engine:
         if self.is_bullet_animation_active():
             return
 
+        # Later: if ANY animation is active, ignore the input
+        # besides blinking status animations.
+
         if self.ui_mode == UIState.CHAR_SHEET:
             self._handle_sheet_keydown(ev)
             return
@@ -342,7 +345,6 @@ class Engine:
                     return
                 self.aiming = True
                 self.aim_x, self.aim_y = sel.x, sel.y
-                self.log.add("Aiming: move cursor with arrows, Enter to shoot, Esc to cancel.")
             return
 
         if ev.sym == tcod.event.KeySym.RETURN:
@@ -581,10 +583,8 @@ class Engine:
             self.log.add("No line of sight.")
             return
 
-        # Accuracy calc
-
         acc = self.compute_spread_acc(shooter, dist)
-        if target:
+        if target: # TODO: Reflect this in status!
             acc -= self.game_map.cover_bonus_at(target.x, target.y)
 
         to_hit_roll = random.randint(1, 100)
@@ -663,7 +663,6 @@ class Engine:
 
     # ----------------- Crates -----------------
     def spawn_random_crate(self) -> None:
-        # Spawn somewhere walkable and empty, preferably mid-map
         attempts = 200
         for _ in range(attempts):
             x = random.randint(0, self.game_map.w - 1)
@@ -769,8 +768,10 @@ class Engine:
             x += step_x
             y += step_y
 
-            if self.game_map.tile_at(x, y) == DOOR or self.game_map.tile_at(x, y) == ROCK or self.game_map.tile_at(x, y) == TREE:
+            if not self.game_map.tile_at(x, y).walkable:
                 return
+            # if self.game_map.tile_at(x, y) == DOOR or self.game_map.tile_at(x, y) == ROCK or self.game_map.tile_at(x, y) == TREE:
+            #     return
 
             if not (0 <= x < self.game_map.w and 0 <= y < self.game_map.h):
                 break
@@ -829,7 +830,7 @@ class Engine:
                 con.print(
                     r.x + 2,
                     y,
-                    f"{a.get_short_name():6} HP {a.hp:2}/{a.hp_max:2} {a.ammo_in_mag:2}/{a.weapon.mag_size:2}+{a.ammo_reserve:2}",
+                    f"{a.get_short_name():6} HP {a.hp:2}/{a.hp_max:2}",
                     fg=fg,
                 )
                 y += 1
@@ -932,17 +933,29 @@ class Engine:
         paperdoll_right_foot = sel.body_parts[10]
 
         paperdoll_y = (status_y + status_h//2 - 3) + 3
-        con.print(status_x + status_w//2, paperdoll_y, f"{paperdoll_head.char}", fg=fg, bg=bg)
-        con.print(status_x + status_w//2, paperdoll_y + 1, f"{paperdoll_neck.char}", fg=fg, bg=bg)
-        con.print(status_x + status_w//2 - 1, paperdoll_y + 2, f"{paperdoll_left_arm.char}", fg=fg, bg=bg)
-        con.print(status_x + status_w//2 + 1, paperdoll_y + 2, f"{paperdoll_right_arm.char}", fg=fg, bg=bg)
-        con.print(status_x + status_w//2, paperdoll_y + 3, f"{paperdoll_torso.char}", fg=fg, bg=bg)
-        con.print(status_x + status_w//2 - 2, paperdoll_y + 2, f"{paperdoll_left_hand.char}", fg=fg, bg=bg)
-        con.print(status_x + status_w//2 + 2, paperdoll_y + 2, f"{paperdoll_right_hand.char}", fg=fg, bg=bg)
-        con.print(status_x + status_w//2 - 1, paperdoll_y + 5, f"{paperdoll_left_leg.char}", fg=fg, bg=bg)
-        con.print(status_x + status_w//2 + 1, paperdoll_y + 5, f"{paperdoll_right_leg.char}", fg=fg, bg=bg)
-        con.print(status_x + status_w//2 - 2, paperdoll_y + 6, f"{paperdoll_left_foot.char}", fg=fg, bg=bg)
-        con.print(status_x + status_w//2 + 2, paperdoll_y + 6, f"{paperdoll_right_foot.char}", fg=fg, bg=bg)
+
+        status = sel.get_body_part_status_and_color("head")
+        con.print(status_x + status_w//2, paperdoll_y, f"{paperdoll_head.char}", fg=status[1], bg=bg)
+        status = sel.get_body_part_status_and_color("neck")
+        con.print(status_x + status_w//2, paperdoll_y + 1, f"{paperdoll_neck.char}", fg=status[1], bg=bg)
+        status = sel.get_body_part_status_and_color("left arm")
+        con.print(status_x + status_w//2 - 1, paperdoll_y + 2, f"{paperdoll_left_arm.char}", fg=status[1], bg=bg)
+        status = sel.get_body_part_status_and_color("right arm")
+        con.print(status_x + status_w//2 + 1, paperdoll_y + 2, f"{paperdoll_right_arm.char}", fg=status[1], bg=bg)
+        status = sel.get_body_part_status_and_color("torso")
+        con.print(status_x + status_w//2, paperdoll_y + 3, f"{paperdoll_torso.char}", fg=status[1], bg=bg)
+        status = sel.get_body_part_status_and_color("left hand")
+        con.print(status_x + status_w//2 - 2, paperdoll_y + 2, f"{paperdoll_left_hand.char}", fg=status[1], bg=bg)
+        status = sel.get_body_part_status_and_color("right hand")
+        con.print(status_x + status_w//2 + 2, paperdoll_y + 2, f"{paperdoll_right_hand.char}", fg=status[1], bg=bg)
+        status = sel.get_body_part_status_and_color("left leg")
+        con.print(status_x + status_w//2 - 1, paperdoll_y + 5, f"{paperdoll_left_leg.char}", fg=status[1], bg=bg)
+        status = sel.get_body_part_status_and_color("right leg")
+        con.print(status_x + status_w//2 + 1, paperdoll_y + 5, f"{paperdoll_right_leg.char}", fg=status[1], bg=bg)
+        status = sel.get_body_part_status_and_color("left foot")
+        con.print(status_x + status_w//2 - 2, paperdoll_y + 6, f"{paperdoll_left_foot.char}", fg=status[1], bg=bg)
+        status = sel.get_body_part_status_and_color("right foot")
+        con.print(status_x + status_w//2 + 2, paperdoll_y + 6, f"{paperdoll_right_foot.char}", fg=status[1], bg=bg)
 
         description = "Priv. " + sel.rank + " " + sel.name + " is proudly: " + sel.nationality + ".\n"
         description += "They like to " + self.eating_name + " " + sel.favorite_dish + ".\n"
@@ -979,22 +992,8 @@ class Engine:
         con.draw_rect(x=health_x+1, y=health_y + 1, width=filled, height=1, ch=1, bg=(245, 0, 0))
         con.print(health_x + 1, health_y + 1, f"Blood: {sel.blood}/{sel.blood_max}", fg=fg, bg=(245, 0, 0))
         statuses = []
-        bleed_severity = 0
-        severity_color_map = {0: (245, 245, 0), 1: (180, 0, 0), 2: (240, 0, 0)}
-        if sel.bleed_rate > 0:
-            if sel.bleed_rate >= 5:
-                statuses.append(f"Severe bleeding! ({sel.bleed_rate} HP/tick)")
-                bleed_severity = 1
-            elif sel.bleed_rate >= 10:
-                statuses.append(f"Critical bleeding! ({sel.bleed_rate} HP/tick)")
-                bleed_severity = 2
-            else:
-                statuses.append(f"Bleeding! ({sel.bleed_rate} HP/tick)")
-        if len(statuses) < 1:
-            con.print(status_x + 1, status_y + 3, "Healthy!", fg=(0, 180, 0), bg=(0,50,0))
-        else:
-            bleeding_status = statuses[0]
-            con.print(status_x + 1, status_y + 3, bleeding_status[:status_w-2], fg=severity_color_map[bleed_severity], bg=(80,0,0))
+        statuses.append(sel.get_bleeding_status_and_color())
+        con.print(status_x + 1, status_y + 3, statuses[0][0][:status_w-2], fg=statuses[0][1], bg=statuses[0][2])
 
         con.print(equip_x + 1, equip_y + 1, f"Weapon: {sel.weapon.name}", fg=fg, bg=bg)
         con.print(

@@ -84,17 +84,17 @@ class Actor:
     constitution: int = 5 # affects hp and survivability
 
     body_parts: List[BodyPart] = field(default_factory=lambda: [
-        BodyPart("Head", hp=10, hp_max=10, hit_chance_modifier=20, blood_loss_modifier=0.5, healing_time_modifier=2.0, char="O"),
-        BodyPart("Neck", hp=5, hp_max=20, hit_chance_modifier=-30, blood_loss_modifier=2, healing_time_modifier=0.2, char="|"),
-        BodyPart("Torso", hp=20, hp_max=20, hit_chance_modifier=-10, blood_loss_modifier=1.0, healing_time_modifier=1.0, char="X"),
-        BodyPart("Left Arm", hp=10, hp_max=10, hit_chance_modifier=-20, blood_loss_modifier=0.8, healing_time_modifier=0.8, char="-"),
-        BodyPart("Right Arm", hp=10, hp_max=10, hit_chance_modifier=-20, blood_loss_modifier=0.8, healing_time_modifier=0.8, char="-"),
-        BodyPart("Left Hand", hp=5, hp_max=5, hit_chance_modifier=-40, blood_loss_modifier=0.3, healing_time_modifier=0.5, char="B"),
-        BodyPart("Right Hand", hp=10, hp_max=10, hit_chance_modifier=-20, blood_loss_modifier=0.8, healing_time_modifier=0.8, char="B"),
-        BodyPart("Left Leg", hp=10, hp_max=10, hit_chance_modifier=-20, blood_loss_modifier=0.8, healing_time_modifier=0.8, char="/"),
-        BodyPart("Right Leg", hp=10, hp_max=10, hit_chance_modifier=-20, blood_loss_modifier=0.8, healing_time_modifier=0.8, char="\\"),
-        BodyPart("Left Foot", hp=5, hp_max=5, hit_chance_modifier=-40, blood_loss_modifier=0.3, healing_time_modifier=0.5, char="_"),
-        BodyPart("Right Foot", hp=5, hp_max=5, hit_chance_modifier=-40, blood_loss_modifier=0.3, healing_time_modifier=0.5, char="_")])
+        BodyPart("Head", hp=10, hp_max=10, hit_chance_modifier=20, blood_loss_modifier=3.0, healing_time_modifier=0.2, char="O"),
+        BodyPart("Neck", hp=20, hp_max=20, hit_chance_modifier=-30, blood_loss_modifier=4.5, healing_time_modifier=0.2, char="|"),
+        BodyPart("Torso", hp=20, hp_max=20, hit_chance_modifier=-10, blood_loss_modifier=2.3, healing_time_modifier=1.0, char="X"),
+        BodyPart("Left Arm", hp=10, hp_max=10, hit_chance_modifier=-20, blood_loss_modifier=1.5, healing_time_modifier=0.8, char="-"),
+        BodyPart("Right Arm", hp=10, hp_max=10, hit_chance_modifier=-20, blood_loss_modifier=1.5, healing_time_modifier=0.8, char="-"),
+        BodyPart("Left Hand", hp=5, hp_max=5, hit_chance_modifier=-40, blood_loss_modifier=1, healing_time_modifier=0.5, char="B"),
+        BodyPart("Right Hand", hp=10, hp_max=10, hit_chance_modifier=-20, blood_loss_modifier=1, healing_time_modifier=0.8, char="B"),
+        BodyPart("Left Leg", hp=10, hp_max=10, hit_chance_modifier=-20, blood_loss_modifier=1, healing_time_modifier=0.8, char="/"),
+        BodyPart("Right Leg", hp=10, hp_max=10, hit_chance_modifier=-20, blood_loss_modifier=1, healing_time_modifier=0.8, char="\\"),
+        BodyPart("Left Foot", hp=5, hp_max=5, hit_chance_modifier=-40, blood_loss_modifier=1, healing_time_modifier=0.5, char="_"),
+        BodyPart("Right Foot", hp=5, hp_max=5, hit_chance_modifier=-40, blood_loss_modifier=1, healing_time_modifier=0.5, char="_")])
 
     def can_reload(self) -> bool:
         return self.alive and self.ammo_in_mag < self.weapon.mag_size and self.ammo_reserve > 0
@@ -142,8 +142,10 @@ class Actor:
         rate = 0
         for p in self.body_parts:
             if p.wounded and p.hp > 0:
-                severity = 1.0 - (p.hp / p.hp_max if p.hp_max > 0 else 1.0)
+                severity = 1.0 - (p.hp / p.hp_max) #(p.hp / p.hp_max if p.hp_max > 0 else 1.0)
                 rate += int(round(p.blood_loss_modifier * (1 + 2 * severity)))
+
+        print(f"Bleeding rate for: {self.get_short_name()}: {rate}")
         self.bleed_rate = max(0, rate)
 
     def take_hit(self, damage: int, acc: int) -> BodyPart:
@@ -159,6 +161,7 @@ class Actor:
             self.alive = False
             self.blood = 0
 
+        print(f"Chosen part for {self.get_short_name()}: {part.name}")
         return part
 
     def get_status_strings(self) -> List[str]:
@@ -176,6 +179,64 @@ class Actor:
         if head.wounded or neck.wounded:
             s.append("Concussed")
         return s
+
+    def get_body_part_status_and_color(self, name: str) -> Tuple[str, Tuple[int, int, int]]:
+        part = next((p for p in self.body_parts if p.name.lower() == name), None)
+        if not part:
+            return ("Unknown", (120, 120, 120))
+
+        if part.hp_max <= 0:
+            return ("Invalid", (120, 120, 120))
+
+        ratio = part.hp / part.hp_max
+        ratio = max(0.0, min(1.0, ratio))
+
+        # ---- Status string ----
+        if part.hp <= 0:
+            status = "Destroyed"
+        elif part.broken:
+            status = "Broken"
+        elif part.wounded:
+            status = "Wounded"
+        else:
+            status = "Healthy"
+
+        if ratio >= 0.5:
+            red = int(255 * (1 - ratio) * 2)
+            green = 255
+        else:
+            red = 255
+            green = int(255 * ratio * 2)
+
+        blue = 0
+        if part.hp <= 0:
+            red = 120
+            green = 0
+
+        color = (red, green, blue)
+        return status, color
+
+    def get_bleeding_status_and_color(self) -> Tuple[str, Tuple[int], Tuple[int]]:
+        severity_color_map_fg = {0: (245, 245, 0), 1: (180, 0, 0), 2: (240, 0, 0), 3: (0, 240, 0)}
+        severity_color_map_bg_bad = (80,0,0)
+        severity_color_map_good = (0,50,0)
+        severity_color_map_bg = severity_color_map_good
+        status = "Without a scratch"
+        color_fg = severity_color_map_fg[3]
+        if self.bleed_rate > 0:
+            if self.bleed_rate >= 5:
+                status = f"Severe bleeding! ({self.bleed_rate} HP/tick)"
+                color_fg = severity_color_map_fg[1]
+                severity_color_map_bg = severity_color_map_bg_bad
+            elif self.bleed_rate >= 10:
+                status = f"Critical bleeding! ({self.bleed_rate} HP/tick)"
+                color_fg = severity_color_map_fg[2]
+                severity_color_map_bg = severity_color_map_bg_bad
+            else:
+                status = f"Bleeding! ({self.bleed_rate} HP/tick)"
+                color_fg = severity_color_map_fg[0]
+                severity_color_map_bg = severity_color_map_bg_bad
+        return (status, color_fg, severity_color_map_bg)
 
     def is_enemy_of(self, other: "Actor") -> bool:
         return self.team_id != other.team_id
