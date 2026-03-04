@@ -210,6 +210,6 @@ class GameMap:
     def cover_bonus_at(self, target_x: int, target_y: int) -> int:
         for dx, dy in ((1,0),(-1,0),(0,1),(0,-1)):
             nx, ny = target_x + dx, target_y + dy
-            if self.in_bounds(nx, ny) and self.tile_at(nx, ny) == ROCK:
+            if self.in_bounds(nx, ny) and not self.tile_at(nx, ny).walkable:
                 return 20  # 20% harder to hit
         return 0

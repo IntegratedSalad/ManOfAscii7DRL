@@ -131,7 +131,7 @@ class Engine:
         if sel:
             self.aim_x, self.aim_y = sel.x, sel.y
 
-        self.log.add("Controls: Arrows move | Tab cycle | F aim/fire | R reload | G pickup | Space end turn | Esc quit")
+        self.log.add("Controls: Arrows move | Tab cycle | F aim/fire | R reload | G pickup | Space end turn | C character sheet | Esc quit")
         self.eating_names = [
             "eat", "devour", "binge on", "feast on", "wolf down", "shovel in", "choke on", "suck on", "nom on", "gorge on", "snarf down", "inhale", "scarf down"
         ]
