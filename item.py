@@ -6,9 +6,8 @@ from typing import Tuple, Optional, Literal
 Color = Tuple[int, int, int]
 ItemKind = Literal["ammo", "med"]
 
-
 @dataclass
-class Item:
+class Item: # TODO: change it to Crate class and add usable item
     x: int
     y: int
     kind: ItemKind

@@ -109,19 +109,19 @@ class Engine:
         w, h = self.game_map.w, self.game_map.h
 
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(0, w // 2 - 3, 3, ord("☻"), (120, 180, 255), 10, 10, RIFLE, 6, 12, **rand_data))
+        self.actors.append(Actor(0, w // 2 - 3, 3, ord("☻"), (120, 180, 255), 10, 10, RIFLE, 6, 100, **rand_data))
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(0, w // 2, 2, ord("☻"), (120, 180, 255), 10, 10, SMG, 10, 10, **rand_data))
+        self.actors.append(Actor(0, w // 2, 2, ord("☻"), (120, 180, 255), 10, 10, SMG, 10, 100, **rand_data))
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(0, w // 2 + 3, 4, ord("☻"), (120, 180, 255), 10, 10, SNIPER, 4, 8, **rand_data))
+        self.actors.append(Actor(0, w // 2 + 3, 4, ord("☻"), (120, 180, 255), 10, 10, SNIPER, 4, 100, **rand_data))
 
         y0 = h - 10
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(1, w // 2 - 3, y0, ord("☻"), (255, 180, 120), 10, 10, RIFLE, 6, 12, **rand_data))
+        self.actors.append(Actor(1, w // 2 - 3, y0, ord("☻"), (255, 180, 120), 10, 10, RIFLE, 6, 100, **rand_data))
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(1, w // 2, y0 + 1, ord("☻"), (255, 180, 120), 10, 10, SMG, 10, 10, **rand_data))
+        self.actors.append(Actor(1, w // 2, y0 + 1, ord("☻"), (255, 180, 120), 10, 10, SMG, 10, 100, **rand_data))
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(1, w // 2 + 3, y0, ord("☻"), (255, 180, 120), 10, 10, SNIPER, 4, 8, **rand_data))
+        self.actors.append(Actor(1, w // 2 + 3, y0, ord("☻"), (255, 180, 120), 10, 10, SNIPER, 4, 100, **rand_data))
 
         self.team_ap[0] = self.team_ap_max
         self.team_ap[1] = self.team_ap_max
@@ -208,7 +208,11 @@ class Engine:
         imp = self.pending_impact
         self.pending_impact = None
 
+        print("grzybosiens")
+        print(f"{imp.impact_type} {imp.actor}")
+
         if imp.impact_type == "actor" and imp.actor and imp.actor.alive:
+            print("sssss")
             hit_part = imp.actor.take_hit(imp.damage, imp.acc)
             self.log.add(
                 f"{imp.shooter_obj.get_short_name()} hits {imp.actor.get_short_name()} ({hit_part.name}) "
@@ -399,7 +403,6 @@ class Engine:
         self._clamp_selection()
 
         self.turn_count += 1
-        self.log.add(f"--- Turn {self.turn_count}: {'Attackers' if self.current_team==1 else 'Defenders'} ---")
 
         # TODO: Add summary of damage of the last turn, e.g. "Def-2 took 3 damage, Atk-1 took 4 damage"
 
@@ -615,6 +618,9 @@ class Engine:
 
             a = self.actor_at(x, y)
             if a and a.alive:
+                if is_hit:
+                    impact_actor = a # if direct hit
+                    break
                 acc -= self.game_map.cover_bonus_at(x, y)  # cover affects any victim, not just the intended target
                 acc = clamp(acc, 5, 95)
 
@@ -745,6 +751,7 @@ class Engine:
             con.print(r.x + bx, r.y + by, "*", fg=(255, 220, 100))
 
         con.print(r.x + 1, r.y + 0, f"Team: {'ATK' if self.current_team==1 else 'DEF'}  AP: {self.team_ap[self.current_team]}/{self.team_ap_max}", fg=(220, 220, 220))
+        con.print(r.x + 22, r.y + 0, f"Turn: {self.turn_count}", fg=(220, 220, 220))
 
     def _spawn_blood_spurt(self, sx: int, sy: int, vx: int, vy: int, power: int = 5) -> None:
         dx = vx - sx
@@ -848,7 +855,7 @@ class Engine:
             con.print(r.x + 1, r.y + 2, "No selection", fg=(120, 120, 120))
             return
 
-        con.print(r.x + 1, r.y + 2, f"{sel.name} ({'ATK' if sel.team_id==1 else 'DEF'})", fg=(255, 255, 255))
+        con.print(r.x + 1, r.y + 2, f"{sel.get_short_name()} ({'ATK' if sel.team_id==1 else 'DEF'})", fg=(255, 255, 255))
         con.print(r.x + 1, r.y + 3, f"Pos: ({sel.x},{sel.y})", fg=(200, 200, 200))
         con.print(r.x + 1, r.y + 4, f"Weapon: {sel.weapon.name}", fg=(200, 200, 200))
         con.print(r.x + 1, r.y + 5, f"Range {sel.weapon.range}  Acc {sel.weapon.base_accuracy}%", fg=(200, 200, 200))
@@ -959,7 +966,9 @@ class Engine:
 
         description = "Priv. " + sel.rank + " " + sel.name + " is proudly: " + sel.nationality + ".\n"
         description += "They like to " + self.eating_name + " " + sel.favorite_dish + ".\n"
-        description += "They think that " + sel.favorite_sentence.lower() + "."
+        description += "They know that " + sel.worldview + " is the way to go, and they have this view since graduating from " + sel.university + ".\n"
+        description += "They think that " + sel.favorite_sentence.lower() + ".\n"
+        description += "When the war ends, they want to go back to the regular life being a " + sel.occupation + "."
 
         desc_lines = textwrap.wrap(description, desc_w - 2)
         ty = desc_y + 1

@@ -16,11 +16,14 @@ def generate_random_soldier_info() -> dict:
     political_views = person.political_views()
     title = person.title()
     university = person.university()
-    worldview = person.worldview()
+    worldview_prefix = ["radical", "extremist", "shy", "curious", "martyrdom-based", "communist", "capitalist", "jungian", "archaist", "demi-", "fucking", "happy", "depressive", "social", "technical", "marxist", "platonic", "idealistic", "mathematical", "degenerate", "orthodox", "alcohol driven", "idiotic"]
+    worldview = random.choice(worldview_prefix).title() + " " + person.worldview().title()
     txt = Text(Locale.EN)
     fav_sentence = txt.sentence()
     fav_dish = Food().dish()
-    return {"name": name, "rank": rank, "nationality": nationality, "political_views": political_views, "title": title, "university": university, "worldview": worldview, "favorite_sentence": fav_sentence, "favorite_dish": fav_dish}
+    occupation_prefix = ["shitty", "skilled", "demotivated", "overworked", "lousy", "decent", "normal", "world class", "known", "great", "incompetent", "beginner"]
+    occupation = random.choice(occupation_prefix) + " " + person.occupation()
+    return {"name": name, "rank": rank, "nationality": nationality, "political_views": political_views, "title": title, "university": university, "worldview": worldview, "favorite_sentence": fav_sentence, "favorite_dish": fav_dish, "occupation": occupation}
 
 def generate_team_name() -> str:
     food = Food(Locale.EN)

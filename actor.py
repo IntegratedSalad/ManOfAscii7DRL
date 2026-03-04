@@ -72,6 +72,7 @@ class Actor:
     worldview: str
     favorite_sentence: str
     favorite_dish: str
+    occupation: str
 
     alive: bool = True
     blood: int = 100
