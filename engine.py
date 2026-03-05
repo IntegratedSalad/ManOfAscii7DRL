@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple
 import random
 import math
-
 import tcod
 import tcod.event
 
@@ -13,12 +12,10 @@ from item import Crate, SMG, RIFLE, SNIPER
 from map import SAND, TREE, GameMap, ROCK, DOOR
 from screen import ScreenLayout
 import textwrap
-
 from utils import *
-
 from enum import Enum, auto
-
 from name_generation import *
+from item import Bandage, IronSupplement
 
 class UIState(Enum):
     PLAY = auto()
@@ -110,20 +107,42 @@ class Engine:
     def setup_demo_match(self) -> None:
         w, h = self.game_map.w, self.game_map.h
 
+        starting_inventory = [
+            Bandage(name="Bandage", ch=ord("#"), fg = (245, 245, 221), stackable=True, qty=2, power=3),
+            IronSupplement(name="Iron Supplement", ch=ord("!"), fg=(255, 255, 255), stackable=True, qty=10, regen=2, duration=12)]
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(0, w // 2 - 3, 3, ord("☻"), (120, 180, 255), 10, 10, RIFLE, 6, 100, inventory=[], **rand_data))
+        starting_inventory = [
+            Bandage(name="Bandage", ch=ord("#"), fg = (245, 245, 221), stackable=True, qty=2, power=3),
+            IronSupplement(name="Iron Supplement", ch=ord("!"), fg=(255, 255, 255), stackable=True, qty=10, regen=2, duration=12)]
+        self.actors.append(Actor(0, w // 2 - 3, 3, ord("☻"), (120, 180, 255), 10, 10, RIFLE, 6, 100, inventory=starting_inventory, **rand_data))
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(0, w // 2, 2, ord("☻"), (120, 180, 255), 10, 10, SMG, 10, 100, inventory=[], **rand_data))
+        starting_inventory = [
+            Bandage(name="Bandage", ch=ord("#"), fg = (245, 245, 221), stackable=True, qty=2, power=3),
+            IronSupplement(name="Iron Supplement", ch=ord("!"), fg=(255, 255, 255), stackable=True, qty=10, regen=2, duration=12)]
+        self.actors.append(Actor(0, w // 2, 2, ord("☻"), (120, 180, 255), 10, 10, SMG, 10, 100, inventory=starting_inventory, **rand_data))
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(0, w // 2 + 3, 4, ord("☻"), (120, 180, 255), 10, 10, SNIPER, 4, 100, inventory=[], **rand_data))
+        starting_inventory = [
+            Bandage(name="Bandage", ch=ord("#"), fg = (245, 245, 221), stackable=True, qty=2, power=3),
+            IronSupplement(name="Iron Supplement", ch=ord("!"), fg=(255, 255, 255), stackable=True, qty=10, regen=2, duration=12)]
+        self.actors.append(Actor(0, w // 2 + 3, 4, ord("☻"), (120, 180, 255), 10, 10, SNIPER, 4, 100, inventory=starting_inventory, **rand_data))
 
         y0 = h - 10
+
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(1, w // 2 - 3, y0, ord("☻"), (255, 180, 120), 10, 10, RIFLE, 6, 100, inventory=[], **rand_data))
+        starting_inventory = [
+            Bandage(name="Bandage", ch=ord("#"), fg = (245, 245, 221), stackable=True, qty=2, power=3),
+            IronSupplement(name="Iron Supplement", ch=ord("!"), fg=(255, 255, 255), stackable=True, qty=10, regen=2, duration=12)]
+        self.actors.append(Actor(1, w // 2 - 3, y0, ord("☻"), (255, 180, 120), 10, 10, RIFLE, 6, 100, inventory=starting_inventory, **rand_data))
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(1, w // 2, y0 + 1, ord("☻"), (255, 180, 120), 10, 10, SMG, 10, 100, inventory=[], **rand_data))
+        starting_inventory = [
+            Bandage(name="Bandage", ch=ord("#"), fg = (245, 245, 221), stackable=True, qty=2, power=3),
+            IronSupplement(name="Iron Supplement", ch=ord("!"), fg=(255, 255, 255), stackable=True, qty=10, regen=2, duration=12)]
+        self.actors.append(Actor(1, w // 2, y0 + 1, ord("☻"), (255, 180, 120), 10, 10, SMG, 10, 100, inventory=starting_inventory, **rand_data))
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(1, w // 2 + 3, y0, ord("☻"), (255, 180, 120), 10, 10, SNIPER, 4, 100, inventory=[], **rand_data))
+        starting_inventory = [
+            Bandage(name="Bandage", ch=ord("#"), fg = (245, 245, 221), stackable=True, qty=2, power=3),
+            IronSupplement(name="Iron Supplement", ch=ord("!"), fg=(255, 255, 255), stackable=True, qty=10, regen=2, duration=12)]
+        self.actors.append(Actor(1, w // 2 + 3, y0, ord("☻"), (255, 180, 120), 10, 10, SNIPER, 4, 100, inventory=starting_inventory, **rand_data))
 
         self.team_ap[0] = self.team_ap_max
         self.team_ap[1] = self.team_ap_max
@@ -488,18 +507,38 @@ class Engine:
             self.log.add("Not enough AP.")
             return False
 
-        # ticks
-        self._tick_team_bleeding(0)
-        self._tick_team_bleeding(1)
-        self._tick_team_blood_regen(0)
-        self._tick_team_blood_regen(1)
+        # ticks TODO|: for every cost?
+        # self._tick_team_bleeding(0)
+        # self._tick_team_bleeding(1)
+        # self._tick_team_blood_regen(0)
+        # self._tick_team_blood_regen(1)
 
         self.team_ap[self.current_team] -= cost
+
+        self._tick_world_on_action(cost)
+
         return True
 
-    def _tick_blood_regen(self):
-        # get every actor from every team
-        pass
+    def _tick_world_on_action(self, ap_spent: int) -> None:
+        deaths = []
+
+        for a in self.alive_actors():
+            if not a.alive:
+                continue
+
+            band_loss = a.tick_bandages(ap_spent)
+
+            bleed_loss = a.tick_bleeding()
+
+            regen = a.tick_blood_regen()
+
+            if not a.alive:
+                deaths.append(a.get_short_name())
+
+        for name in deaths:
+            self.log.add(f"{name} bleeds out!")
+
+        self._check_victory()
 
     def try_move_selected(self, dx: int, dy: int) -> None:
         sel = self.get_selected_actor()
@@ -1093,7 +1132,12 @@ class Engine:
         con.print(health_x + 1, health_y + 1, f"Blood: {sel.blood}/{sel.blood_max}", fg=fg, bg=(245, 0, 0))
         statuses = []
         statuses.append(sel.get_bleeding_status_and_color())
+        statuses.append(sel.get_treatment_status_and_color())
+        statuses.append(sel.get_iron_supplement_status_and_color())
         con.print(status_x + 1, status_y + 3, statuses[0][0][:status_w-2], fg=statuses[0][1], bg=statuses[0][2])
+        con.print(status_x + 1, status_y + 4, statuses[1][0][:status_w-2], fg=statuses[1][1], bg=statuses[1][2])
+        if statuses[2][0] is not None:
+            con.print(status_x + 1, status_y + 5, statuses[2][0][:status_w-2], fg=statuses[2][1], bg=statuses[2][2])
 
         con.print(equip_x + 1, equip_y + 1, f"Weapon: {sel.weapon.name}", fg=fg, bg=bg)
         con.print(
@@ -1124,10 +1168,16 @@ class Engine:
             if not inv:
                 con.print(equip_x + 1, ty, "(empty)", fg=(140, 140, 140), bg=bg)
             else:
-                for it in inv[: (equip_y + equip_h - 1) - ty]:
-                    name = getattr(it, "name", str(it))
-                    con.print(equip_x + 1, ty, f"- {name}"[: equip_w - 2], fg=fg, bg=bg)
-                    ty += 1
+                top = ty + 3
+                max_rows = h - 5
+                start = 0
+                if self.inv_index >= max_rows:
+                    start = self.inv_index - max_rows + 1
+                for row, idx in enumerate(range(start, min(len(inv), start + max_rows))):
+                    it = inv[idx]
+                    marker = ">" if idx == self.inv_index else " "
+                    qty = f" x{it.qty}" if getattr(it, "stackable", False) and it.qty > 1 else ""
+                    con.print(equip_x + 1, top + row, f"{marker} {it.name}{qty}", fg=(220,220,220))
 
     def _render_inventory(self, con: tcod.Console) -> None:
         sel = self.get_selected_actor()

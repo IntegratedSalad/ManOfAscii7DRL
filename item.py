@@ -42,11 +42,31 @@ class Bandage(Item): # helps with bleed_rate a little
     power: int = 3
 
     def use(self, ctx: UseContext, user) -> bool:
-        user.bleed_rate = max(0, user.bleed_rate - self.power)
-        if user.blood < user.blood_max:
-            user.blood = min(user.blood_max, user.blood + self.power*2)
-        ctx.log_add(f"{user.get_short_name()} applies bandage!")
-        return True
+        # Find candidate parts: wounded, not destroyed, not already bandaged
+        candidates = [
+            p for p in user.body_parts
+            if p.wounded and p.hp > 0 and not getattr(p, "is_bandaged", False)
+        ]
+        if not candidates:
+            ctx.log_add(f"{user.get_short_name()} has nothing to bandage.")
+            return False
+
+        def severity(p):
+            return 1.0 - (p.hp / p.hp_max if p.hp_max > 0 else 1.0)
+
+        part = max(candidates, key=severity)
+
+        # part.apply_bandage
+
+        # Apply bandage state (your AP-based mechanic)
+        part.bandage_ap_left = 100
+        part.bandage_bleed_acc = 0
+
+        # Important: remove this part from normal bleed_rate calc
+        user.recalc_bleed_rate_from_parts()
+
+        ctx.log_add(f"{user.get_short_name()} applies a bandage to {part.name} (100 AP).")
+        return True  # consumed
 
 @dataclass
 class IronSupplement(Item): # provides blood regen
@@ -55,7 +75,7 @@ class IronSupplement(Item): # provides blood regen
 
     def use(self, ctx: UseContext, user) -> bool:
         user.blood_regen_ticks += self.duration
-        user.blood_regent_amount = max(user.blood_regent_amount, self.regen)
+        user.blood_regen_amount = max(user.blood_regen_amount, self.regen)
         ctx.log_add(f"{user.get_short_name()} takes iron supplements!")
         return True
 

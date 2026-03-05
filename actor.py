@@ -22,6 +22,13 @@ class BodyPart:
 
     equipment: EquipmentItem = None
 
+    bandage_ap_left: int = 0
+    bandage_bleed_acc: int = 0
+
+    @property
+    def is_bandaged(self) -> bool:
+        return self.bandage_ap_left > 0
+
     def get_color(self) -> Color:
         # Return a color based on hp percentage. Green when healthy, red when damaged.
         ratio = self.hp / self.hp_max if self.hp_max > 0 else 0
@@ -80,6 +87,7 @@ class Actor:
 
     blood_regen_ticks: int = 0
     blood_regen_amount: int = 0
+    bandage_ticks: int = 0 # bandaging means there's 1hp every 20 APs for 100 APs
 
     body_parts: List[BodyPart] = field(default_factory=lambda: [
         BodyPart("Head", hp=10, hp_max=10, hit_chance_modifier=20, blood_loss_modifier=3.0, healing_time_modifier=0.2, char="O"),
@@ -98,6 +106,19 @@ class Actor:
     def defense(self) -> int:
         # for ...
         pass
+
+    def apply_bandage_to_part(self, part_name: str, ap_total: int = 100) -> bool:
+        if not self.alive:
+            return False
+
+        part = self.get_body_part_from_name(part_name)
+        if not part.wounded or part.hp <= 0:
+            # either not wounded or destroyed; up to you if bandage should be allowed
+            return False
+
+        part.bandage_ap_left = ap_total
+        part.bandage_bleed_acc = 0
+        return True
 
     def can_reload(self) -> bool:
         return self.alive and self.ammo_in_mag < self.weapon.mag_size and self.ammo_reserve > 0
@@ -149,10 +170,43 @@ class Actor:
         if self.blood_regen_amount > 0:
             print(f"{self.get_short_name()} regenerates {self.blood_regen_amount} blood!")
 
+    def tick_bandages(self, ap_spent: int) -> int:
+        """
+        Progress all bandages by ap_spent.
+        For each bandaged wound:
+        - every 20 AP -> lose 1 blood
+        - after 100 AP -> wound is treated (wounded=False), bandage removed
+        Returns how much blood was lost due to bandaged wounds this tick.
+        """
+        if not self.alive or ap_spent <= 0:
+            return 0
+
+        blood_loss = 0
+
+        for p in self.body_parts:
+            if not p.is_bandaged:
+                continue
+
+            p.bandage_ap_left = max(0, p.bandage_ap_left - ap_spent)
+
+            p.bandage_bleed_acc += ap_spent
+            while p.bandage_bleed_acc >= 20:
+                p.bandage_bleed_acc -= 20
+                blood_loss += 1
+
+            if p.bandage_ap_left == 0:
+                p.wounded = False
+                # broken stays broken
+
+        if blood_loss > 0:
+            self.apply_blood_loss(blood_loss)
+
+        return blood_loss
+
     def recalc_bleed_rate_from_parts(self) -> None:
         rate = 0
         for p in self.body_parts:
-            if p.wounded and p.hp > 0:
+            if p.wounded and p.hp > 0 and not p.is_bandaged:
                 severity = 1.0 - (p.hp / p.hp_max) #(p.hp / p.hp_max if p.hp_max > 0 else 1.0)
                 rate += int(round(p.blood_loss_modifier * (1 + 2 * severity)))
 
@@ -228,11 +282,14 @@ class Actor:
         return status, color
 
     def get_bleeding_status_and_color(self) -> Tuple[str, Tuple[int], Tuple[int]]:
+        def is_bandaged(p) -> bool:
+            return getattr(p, "bandage_ap_left", 0) > 0
+
         severity_color_map_fg = {0: (245, 245, 0), 1: (180, 0, 0), 2: (240, 0, 0), 3: (0, 240, 0)}
         severity_color_map_bg_bad = (80,0,0)
         severity_color_map_good = (0,50,0)
         severity_color_map_bg = severity_color_map_good
-        status = "Without a scratch"
+        status = "No bleeding"
         color_fg = severity_color_map_fg[3]
         if self.bleed_rate > 0:
             if self.bleed_rate >= 5:
@@ -248,6 +305,88 @@ class Actor:
                 color_fg = severity_color_map_fg[0]
                 severity_color_map_bg = severity_color_map_bg_bad
         return (status, color_fg, severity_color_map_bg)
+
+
+    def get_treatment_status_and_color(self) -> Tuple[str, Tuple[int, int, int], Tuple[int, int, int]]:
+        """
+        Treatment UI:
+        - Untreated wounds (wounded and not bandaged)
+        - Bandaged wounds (wounded and bandaged; show remaining AP)
+        - Broken parts
+        - Iron supplements active (blood regen)
+        """
+
+        fg_map = {
+            "good": (0, 240, 0),
+            "warn": (245, 245, 0),
+            "bad":  (240, 0, 0),
+            "info": (140, 200, 255),
+            "gray": (180, 180, 180),
+        }
+        bg_bad = (80, 0, 0)
+        bg_good = (0, 50, 0)
+        bg_info = (0, 30, 60)
+
+        def is_bandaged(p) -> bool:
+            return getattr(p, "bandage_ap_left", 0) > 0
+
+        wounded_parts = [p for p in self.body_parts if p.wounded and p.hp > 0]
+        broken_parts = [p for p in self.body_parts if p.broken and p.hp > 0]
+
+        untreated = [p for p in wounded_parts if not is_bandaged(p)]
+        bandaged = [p for p in wounded_parts if is_bandaged(p)]
+
+        iron_ticks = getattr(self, "blood_regen_ticks", 0)
+        iron_amt = getattr(self, "blood_regen_amount", 0)
+        iron_active = iron_ticks > 0
+
+        # Base status
+        if not wounded_parts and not broken_parts:
+            status = "No untreated wounds."
+            fg = fg_map["good"]
+            bg = bg_good
+        else:
+            # if anything is untreated, treat as danger/warn
+            if broken_parts:
+                status = f"Untreated: {len(untreated)} | Bandaged: {len(bandaged)} | Broken: {len(broken_parts)}"
+                fg = fg_map["bad"] if len(untreated) > 0 else fg_map["warn"]
+                bg = bg_bad
+            else:
+                status = f"Untreated: {len(untreated)} | Bandaged: {len(bandaged)}"
+                fg = fg_map["bad"] if len(untreated) > 0 else (fg_map["warn"] if bandaged else fg_map["good"])
+                bg = bg_bad if (len(untreated) > 0) else bg_good
+
+        return (status, fg, bg)
+
+    def get_iron_supplement_status_and_color(self) -> Tuple[Optional[str], Tuple[int, int, int], Tuple[int, int, int]]:
+        fg_map = {
+            "good": (0, 240, 0),
+            "warn": (245, 245, 0),
+            "bad":  (240, 0, 0),
+            "info": (140, 200, 255),
+            "gray": (180, 180, 180),
+        }
+        bg_info = (0, 30, 60)
+        bg = bg_info
+        fg = fg_map["good"]
+        def is_bandaged(p) -> bool: # wtf is that, just get bandage_ap_left...
+            return getattr(p, "bandage_ap_left", 0) > 0
+
+        wounded_parts = [p for p in self.body_parts if p.wounded and p.hp > 0]
+        untreated = [p for p in wounded_parts if not is_bandaged(p)]
+
+        iron_ticks = getattr(self, "blood_regen_ticks", 0)
+        iron_active = iron_ticks > 0
+
+        status = None
+        if untreated and not iron_active:
+            status = "No iron supplemented!"
+            fg = fg_map['warn']
+        elif (untreated or not untreated) and iron_active:
+            status = "Iron supplemented :)"
+            fg = fg_map["good"]
+
+        return (status, fg, bg)
 
     def is_enemy_of(self, other: "Actor") -> bool:
         return self.team_id != other.team_id
