@@ -8,8 +8,8 @@ import math
 import tcod
 import tcod.event
 
-from actor import Actor, RIFLE, SMG, SNIPER
-from item import Item
+from actor import Actor
+from item import Crate, SMG, RIFLE, SNIPER
 from map import SAND, TREE, GameMap, ROCK, DOOR
 from screen import ScreenLayout
 import textwrap
@@ -23,6 +23,7 @@ from name_generation import *
 class UIState(Enum):
     PLAY = auto()
     CHAR_SHEET = auto()
+    INVENTORY = auto()
 
 class SheetTab(Enum):
     OVERVIEW = auto()
@@ -78,7 +79,7 @@ class Engine:
         self.sheet_scroll = 0
 
         self.actors: List[Actor] = []
-        self.items: List[Item] = []
+        self.crates: List[Crate] = []
 
         # bullet animation state: path and current index
         self.bullet_path: List[Tuple[int,int]] = []
@@ -94,6 +95,7 @@ class Engine:
         self.team_ap_max = 20
 
         self.selected_index: int = 0  # index within filtered list of current team alive actors
+        self.inv_index = 0
 
         # Aiming mode
         self.aiming: bool = False
@@ -109,19 +111,19 @@ class Engine:
         w, h = self.game_map.w, self.game_map.h
 
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(0, w // 2 - 3, 3, ord("☻"), (120, 180, 255), 10, 10, RIFLE, 6, 100, **rand_data))
+        self.actors.append(Actor(0, w // 2 - 3, 3, ord("☻"), (120, 180, 255), 10, 10, RIFLE, 6, 100, inventory=[], **rand_data))
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(0, w // 2, 2, ord("☻"), (120, 180, 255), 10, 10, SMG, 10, 100, **rand_data))
+        self.actors.append(Actor(0, w // 2, 2, ord("☻"), (120, 180, 255), 10, 10, SMG, 10, 100, inventory=[], **rand_data))
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(0, w // 2 + 3, 4, ord("☻"), (120, 180, 255), 10, 10, SNIPER, 4, 100, **rand_data))
+        self.actors.append(Actor(0, w // 2 + 3, 4, ord("☻"), (120, 180, 255), 10, 10, SNIPER, 4, 100, inventory=[], **rand_data))
 
         y0 = h - 10
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(1, w // 2 - 3, y0, ord("☻"), (255, 180, 120), 10, 10, RIFLE, 6, 100, **rand_data))
+        self.actors.append(Actor(1, w // 2 - 3, y0, ord("☻"), (255, 180, 120), 10, 10, RIFLE, 6, 100, inventory=[], **rand_data))
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(1, w // 2, y0 + 1, ord("☻"), (255, 180, 120), 10, 10, SMG, 10, 100, **rand_data))
+        self.actors.append(Actor(1, w // 2, y0 + 1, ord("☻"), (255, 180, 120), 10, 10, SMG, 10, 100, inventory=[], **rand_data))
         rand_data = generate_random_soldier_info()
-        self.actors.append(Actor(1, w // 2 + 3, y0, ord("☻"), (255, 180, 120), 10, 10, SNIPER, 4, 100, **rand_data))
+        self.actors.append(Actor(1, w // 2 + 3, y0, ord("☻"), (255, 180, 120), 10, 10, SNIPER, 4, 100, inventory=[], **rand_data))
 
         self.team_ap[0] = self.team_ap_max
         self.team_ap[1] = self.team_ap_max
@@ -152,8 +154,8 @@ class Engine:
                 return a
         return None
 
-    def item_at(self, x: int, y: int) -> Optional[Item]:
-        for it in self.items:
+    def crate_at(self, x: int, y: int) -> Optional[Crate]:
+        for it in self.crates:
             if it.x == x and it.y == y:
                 return it
         return None
@@ -207,9 +209,6 @@ class Engine:
 
         imp = self.pending_impact
         self.pending_impact = None
-
-        print("grzybosiens")
-        print(f"{imp.impact_type} {imp.actor}")
 
         if imp.impact_type == "actor" and imp.actor and imp.actor.alive:
             print("sssss")
@@ -280,6 +279,63 @@ class Engine:
             self.sheet_scroll += 10
         # maybe render everything onto one tab
 
+    def _handle_inventory_keydown(self, ev: tcod.event.KeyDown) -> None:
+        sel = self.get_selected_actor()
+        if not sel:
+            self.ui_mode = UIState.PLAY
+            return
+
+        inv = getattr(sel, "inventory", [])
+        if ev.sym in (tcod.event.KeySym.ESCAPE, tcod.event.KeySym.i):
+            self.ui_mode = UIState.PLAY
+            return
+
+        if ev.sym == tcod.event.KeySym.UP:
+            if inv:
+                self.inv_index = (self.inv_index - 1) % len(inv)
+            return
+        if ev.sym == tcod.event.KeySym.DOWN:
+            if inv:
+                self.inv_index = (self.inv_index + 1) % len(inv)
+            return
+
+        if ev.sym == tcod.event.KeySym.RETURN:
+            if not inv:
+                return
+            it = inv[self.inv_index]
+            # block usage during bullet animation is already handled in your early return
+
+            # Spend AP to use item (tune cost)
+            USE_COST = 2
+            if not self._spend_ap(USE_COST):
+                return
+
+            consumed = it.use(self, sel)  # Engine acts as ctx (add log_add + spawn_explosion methods below)
+            if consumed:
+                # stackables
+                if getattr(it, "stackable", False) and it.qty > 1:
+                    it.qty -= 1
+                else:
+                    inv.pop(self.inv_index)
+                    self.inv_index = max(0, min(self.inv_index, len(inv) - 1))
+            return
+
+        if ev.sym == tcod.event.KeySym.d:
+            # Drop item onto ground at player's tile
+            if not inv:
+                return
+            DROP_COST = 1
+            if not self._spend_ap(DROP_COST):
+                return
+            it = inv.pop(self.inv_index)
+            # You already have Item instances with x,y for map items; if your inventory items
+            # don't have x,y, create a "world item" wrapper or just add attributes:
+            it.x, it.y = sel.x, sel.y
+            self.items.append(it)
+            self.log.add(f"{sel.get_short_name()} drops {it.name}.")
+            self.inv_index = max(0, min(self.inv_index, len(inv) - 1))
+            return
+
     def _handle_keydown(self, ev: tcod.event.KeyDown) -> None:
 
         if self.is_bullet_animation_active():
@@ -290,6 +346,10 @@ class Engine:
 
         if self.ui_mode == UIState.CHAR_SHEET:
             self._handle_sheet_keydown(ev)
+            return
+
+        if self.ui_mode == UIState.INVENTORY:
+            self._handle_inventory_keydown(ev)
             return
 
         if ev.sym == tcod.event.KeySym.ESCAPE:
@@ -322,6 +382,12 @@ class Engine:
                 self.ui_mode = UIState.CHAR_SHEET
                 self.sheet_tab = SheetTab.OVERVIEW
                 self.sheet_scroll = 0
+            return
+
+        if ev.sym == tcod.event.KeySym.I:
+            if self.get_selected_actor():
+                self.ui_mode = UIState.INVENTORY
+                self.inv_index = 0
             return
 
         dx, dy = 0, 0
@@ -388,14 +454,19 @@ class Engine:
         for name in deaths:
             self.log.add(f"{name} bleeds out!")
 
+    def _tick_team_blood_regen(self, team_id: int) -> None:
+        for a in self.team_actors(team_id):
+            if not a.alive:
+                continue
+            a.tick_blood_regen()
+
     def end_turn(self) -> None:
-        # TODO: do this as someone moves, not when next turn!
-        for a in self.alive_actors():
-            loss = a.tick_bleeding()
-            if loss > 0:
-                self.log.add(f"{a.get_short_name()} loses {loss} blood!")
-                if not a.alive:
-                    self.log.add(f"{a.get_short_name()} bleeds out!")
+        # for a in self.alive_actors():
+        #     loss = a.tick_bleeding()
+        #     if loss > 0:
+        #         self.log.add(f"{a.get_short_name()} loses {loss} blood!")
+        #         if not a.alive:
+        #             self.log.add(f"{a.get_short_name()} bleeds out!")
 
         self.aiming = False
         self.current_team = 1 - self.current_team
@@ -412,16 +483,23 @@ class Engine:
 
         self._check_victory()
 
-    def _spend_ap(self, cost: int) -> bool:
+    def _spend_ap(self, cost: int) -> bool: # every action results in this
         if self.team_ap[self.current_team] < cost:
             self.log.add("Not enough AP.")
             return False
 
+        # ticks
         self._tick_team_bleeding(0)
         self._tick_team_bleeding(1)
+        self._tick_team_blood_regen(0)
+        self._tick_team_blood_regen(1)
 
         self.team_ap[self.current_team] -= cost
         return True
+
+    def _tick_blood_regen(self):
+        # get every actor from every team
+        pass
 
     def try_move_selected(self, dx: int, dy: int) -> None:
         sel = self.get_selected_actor()
@@ -488,13 +566,14 @@ class Engine:
         sel = self.get_selected_actor()
         if not sel or not sel.alive:
             return
-        it = self.item_at(sel.x, sel.y)
+        it = self.crate_at(sel.x, sel.y)
         if not it:
             self.log.add("Nothing to pick up.")
             return
         if not self._spend_ap(self.PICKUP_COST):
             return
 
+        # if crate
         if it.kind == "ammo":
             sel.ammo_reserve += it.amount
             self.log.add(f"{sel.get_short_name()} picks up ammo (+{it.amount}).")
@@ -503,7 +582,7 @@ class Engine:
             sel.hp = min(sel.hp_max, sel.hp + it.amount)
             self.log.add(f"{sel.get_short_name()} uses medkit (+{sel.hp - before} HP).")
 
-        self.items.remove(it)
+        self.crates.remove(it)
 
     def miss_offset_by_acc_(self, acc: int) -> int:
         # If roll >= acc, so offset decreases with accuracy increase
@@ -677,14 +756,14 @@ class Engine:
                 continue
             if self.actor_at(x, y) is not None:
                 continue
-            if self.item_at(x, y) is not None:
+            if self.crate_at(x, y) is not None:
                 continue
 
             if random.random() < 0.5:
-                it = Item.ammo_crate(x, y, amount=random.choice([6, 8, 10]))
+                it = Crate.ammo_crate(x, y, amount=random.choice([6, 8, 10]))
             else:
-                it = Item.med_crate(x, y, amount=random.choice([3, 4, 5]))
-            self.items.append(it)
+                it = Crate.med_crate(x, y, amount=random.choice([3, 4, 5]))
+            self.crates.append(it)
             self.log.add(f"A crate drops at ({x},{y})!")
             return
 
@@ -696,6 +775,9 @@ class Engine:
 
         if self.ui_mode == UIState.CHAR_SHEET:
             self._render_character_sheet(con)
+
+        if self.ui_mode == UIState.INVENTORY:
+            self._render_inventory(con)
 
     def _render_map(self, con: tcod.Console) -> None:
         r = self.layout.map_rect
@@ -716,7 +798,7 @@ class Engine:
                 else:
                     con.print(x=r.x + x, y=r.y + y, string=chr(t.ch), fg=t.fg, bg=t.bg)
 
-        for it in self.items:
+        for it in self.crates:
             con.print(r.x + it.x, r.y + it.y, chr(it.ch), fg=it.fg)
 
         for a in self.alive_actors():
@@ -795,6 +877,15 @@ class Engine:
             self.game_map.add_blood(jx, jy, amount=1)
 
         # Extra splat at victim position
+    def spawn_explosion(self, x: int, y: int, radius: int, damage: int, source_team: int) -> None:
+        # Affect actors in diamond radius (Manhattan). Keep it simple.
+        for a in self.alive_actors():
+            dist = abs(a.x - x) + abs(a.y - y)
+            if dist <= radius:
+                # optional cover reduction later
+                a.take_damage(damage)  # or take_hit/blood logic
+                self.log.add(f"{a.get_short_name()} is hit by explosion ({damage}).")
+        # TODO: shrapnel, animation etc...
 
     def draw_section_divider(self, con, x, y, width, title, fg=(180,180,180), bg=(0,0,0)):
         line_chr = '═'
@@ -861,7 +952,7 @@ class Engine:
         con.print(r.x + 1, r.y + 5, f"Range {sel.weapon.range}  Acc {sel.weapon.base_accuracy}%", fg=(200, 200, 200))
         con.print(r.x + 1, r.y + 6, f"Dmg {sel.weapon.damage}  Ammo {sel.ammo_in_mag}/{sel.weapon.mag_size} +{sel.ammo_reserve}", fg=(200, 200, 200))
 
-        it = self.item_at(sel.x, sel.y)
+        it = self.crate_at(sel.x, sel.y)
         if it:
             con.print(r.x + 1, r.y + 8, f"On tile: {it.name} (G)", fg=(220, 220, 180))
 
@@ -1037,3 +1128,38 @@ class Engine:
                     name = getattr(it, "name", str(it))
                     con.print(equip_x + 1, ty, f"- {name}"[: equip_w - 2], fg=fg, bg=bg)
                     ty += 1
+
+    def _render_inventory(self, con: tcod.Console) -> None:
+        sel = self.get_selected_actor()
+        if not sel:
+            return
+
+        # darken background
+        con.draw_rect(0, 0, self.layout.screen_w, self.layout.screen_h,
+                    ch=ord(" "), bg=(40,40,40), bg_blend=tcod.BKGND_MULTIPLY)
+
+        w, h = self.layout.screen_w - 10, self.layout.screen_h - 10
+        x, y = 5, 5
+        self._panel_frame(con, x, y, w, h, "Inventory")
+
+        inv = getattr(sel, "inventory", [])
+        con.print(x + 2, y + 1, f"{sel.get_short_name()}  |  Enter: use  D: drop  Esc/I: close", fg=(220,220,220))
+
+        if not inv:
+            con.print(x + 2, y + 3, "(empty)", fg=(140,140,140))
+            return
+
+        top = y + 3
+        max_rows = h - 5
+        start = 0
+        if self.inv_index >= max_rows:
+            start = self.inv_index - max_rows + 1
+
+        for row, idx in enumerate(range(start, min(len(inv), start + max_rows))):
+            it = inv[idx]
+            marker = ">" if idx == self.inv_index else " "
+            qty = f" x{it.qty}" if getattr(it, "stackable", False) and it.qty > 1 else ""
+            con.print(x + 2, top + row, f"{marker} {it.name}{qty}", fg=(220,220,220))
+
+    def log_add(self, msg: str) -> None:
+        self.log.add(msg)

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Iterable, List, Optional, Tuple
 import random
 
-from item import Item
+from item import Crate
 
 import tcod
 
@@ -140,7 +140,7 @@ class GameMap:
         return gm
 
     @staticmethod
-    def generate_streets(w: int, h: int) -> tuple["GameMap", List["Item"]]:
+    def generate_streets(w: int, h: int) -> tuple["GameMap", List["Crate"]]:
         tiles: List[List[Tile]] = [[SAND for _ in range(w)] for _ in range(h)]
 
         transparent = [[tiles[y][x].transparent for x in range(w)] for y in range(h)]
@@ -148,7 +148,7 @@ class GameMap:
         gm = GameMap(w=w, h=h, tiles=tiles, transparent=transparent, walkable=walkable)
 
         rng = random.Random()
-        starting_items: List[Item] = []
+        starting_crates: List[Crate] = []
 
         building_count = max(1, (w * h) // 300)
         for _ in range(building_count):
@@ -184,9 +184,9 @@ class GameMap:
                 cx = rng.randint(bx + 1, bx + bw - 2)
                 cy = rng.randint(by + 1, by + bh - 2)
                 if rng.random() < 0.5:
-                    starting_items.append(Item.ammo_crate(cx, cy, amount=rng.choice([6, 8, 10])))
+                    starting_crates.append(Crate.ammo_crate(cx, cy, amount=rng.choice([6, 8, 10])))
                 else:
-                    starting_items.append(Item.med_crate(cx, cy, amount=rng.choice([3, 4, 5])))
+                    starting_crates.append(Crate.med_crate(cx, cy, amount=rng.choice([3, 4, 5])))
 
         rock_count = (w * h) // 140
         for _ in range(rock_count):
@@ -195,7 +195,7 @@ class GameMap:
             if gm.tile_at(x, y) == SAND and rng.random() < 0.8:
                 gm.set_tile(x, y, ROCK)
 
-        return gm, starting_items
+        return gm, starting_crates
 
     def los(self, x0: int, y0: int, x1: int, y1: int) -> bool:
         for x, y in tcod.los.bresenham((x0, y0), (x1, y1)).tolist():

@@ -3,21 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import random
 from typing import List, Tuple, Optional
+from item import EquipmentItem, Item, WeaponData
 
 Color = Tuple[int, int, int]
-
-@dataclass
-class Weapon: # move it to the item.py, as weapons will drop upon death, and can be picked up by other actors.
-    name: str
-    range: int
-    base_accuracy: int  # percent
-    damage: int
-    mag_size: int
-
-
-RIFLE = Weapon("Rifle", range=12, base_accuracy=70, damage=3, mag_size=6)
-SMG = Weapon("SMG", range=8, base_accuracy=65, damage=2, mag_size=10)
-SNIPER = Weapon("Sniper", range=16, base_accuracy=80, damage=4, mag_size=4)
 
 @dataclass
 class BodyPart:
@@ -31,6 +19,8 @@ class BodyPart:
 
     wounded: bool = False
     broken: bool = False
+
+    equipment: EquipmentItem = None
 
     def get_color(self) -> Color:
         # Return a color based on hp percentage. Green when healthy, red when damaged.
@@ -47,6 +37,9 @@ class BodyPart:
         if self.hp_max > 0 and (self.hp / self.hp_max) < 0.23:
             self.broken = True
 
+    def equip(self, eq: EquipmentItem):
+        self.equipment = eq
+
 @dataclass
 class Actor:
     team_id: int  # 0 defenders, 1 attackers
@@ -59,7 +52,7 @@ class Actor:
     hp: int
     hp_max: int
 
-    weapon: Weapon
+    weapon: WeaponData # for now weapon data. This is the special weapon slot
     ammo_in_mag: int
     ammo_reserve: int
 
@@ -73,6 +66,7 @@ class Actor:
     favorite_sentence: str
     favorite_dish: str
     occupation: str
+    inventory: List[Item]
 
     alive: bool = True
     blood: int = 100
@@ -83,6 +77,9 @@ class Actor:
     strength: int = 5
     dexterity: int = 5 # affects accuracy and evasion
     constitution: int = 5 # affects hp and survivability
+
+    blood_regen_ticks: int = 0
+    blood_regen_amount: int = 0
 
     body_parts: List[BodyPart] = field(default_factory=lambda: [
         BodyPart("Head", hp=10, hp_max=10, hit_chance_modifier=20, blood_loss_modifier=3.0, healing_time_modifier=0.2, char="O"),
@@ -96,6 +93,11 @@ class Actor:
         BodyPart("Right Leg", hp=10, hp_max=10, hit_chance_modifier=-20, blood_loss_modifier=1, healing_time_modifier=0.8, char="\\"),
         BodyPart("Left Foot", hp=5, hp_max=5, hit_chance_modifier=-40, blood_loss_modifier=1, healing_time_modifier=0.5, char="_"),
         BodyPart("Right Foot", hp=5, hp_max=5, hit_chance_modifier=-40, blood_loss_modifier=1, healing_time_modifier=0.5, char="_")])
+
+    @property
+    def defense(self) -> int:
+        # for ...
+        pass
 
     def can_reload(self) -> bool:
         return self.alive and self.ammo_in_mag < self.weapon.mag_size and self.ammo_reserve > 0
@@ -138,6 +140,14 @@ class Actor:
             print(f"{self.get_short_name()} bleeds for {loss} blood.")
             self.apply_blood_loss(loss)
         return loss
+
+    def tick_blood_regen(self) -> None:
+        self.blood_regen_ticks -= 1
+        self.blood = min(self.blood_max, self.blood + self.blood_regen_amount)
+        if self.blood_regen_ticks <= 0:
+            self.blood_regen_amount = 0
+        if self.blood_regen_amount > 0:
+            print(f"{self.get_short_name()} regenerates {self.blood_regen_amount} blood!")
 
     def recalc_bleed_rate_from_parts(self) -> None:
         rate = 0
@@ -243,4 +253,114 @@ class Actor:
         return self.team_id != other.team_id
 
     def get_short_name(self) -> str:
-        return self.name.split()[0]  # first name only, for compact display on the map
+        return self.name.split()[0]  # first name only, for compact display on the mapq
+
+    def get_body_part_from_name(self, name: str) -> BodyPart:
+        """
+        Find a BodyPart by name (case-insensitive) with some friendly alias handling.
+        Examples it accepts:
+        "Head", "head", " HEAD "
+        "Left Arm", "leftarm", "l arm", "l_arm", "left-arm"
+        "Right Leg", "rleg", "right_leg"
+        "Torso", "body"
+        also matches by char if you pass e.g. "O" (Head), "X" (Torso)
+        Raises ValueError if not found.
+        """
+        if not name or not name.strip():
+            raise ValueError("get_body_part_from_name: empty name")
+
+        raw = name.strip()
+
+        # Normalize: lower, remove separators
+        key = raw.lower().replace("_", " ").replace("-", " ")
+        key = " ".join(key.split())  # collapse whitespace
+
+        # Quick match by exact normalized name
+        for p in self.body_parts:
+            if p.name.lower() == key:
+                return p
+
+        # Allow matching by body part char (paperdoll glyph), e.g. "O"
+        if len(raw.strip()) == 1:
+            c = raw.strip()
+            for p in self.body_parts:
+                if p.char == c:
+                    return p
+
+        # Aliases
+        aliases = {
+            "body": "torso",
+            "chest": "torso",
+            "abdomen": "torso",
+            "head": "head",
+            "neck": "neck",
+
+            "l arm": "left arm",
+            "leftarm": "left arm",
+            "left arm": "left arm",
+            "r arm": "right arm",
+            "rightarm": "right arm",
+            "right arm": "right arm",
+
+            "l hand": "left hand",
+            "lefthand": "left hand",
+            "left hand": "left hand",
+            "r hand": "right hand",
+            "rhand": "right hand",
+            "righthand": "right hand",
+            "right hand": "right hand",
+
+            "l leg": "left leg",
+            "lleg": "left leg",
+            "leftleg": "left leg",
+            "left leg": "left leg",
+            "r leg": "right leg",
+            "rleg": "right leg",
+            "rightleg": "right leg",
+            "right leg": "right leg",
+
+            "l foot": "left foot",
+            "lfoot": "left foot",
+            "leftfoot": "left foot",
+            "left foot": "left foot",
+            "r foot": "right foot",
+            "rfoot": "right foot",
+            "rightfoot": "right foot",
+            "right foot": "right foot",
+        }
+
+        # Also accept compact forms like "left  arm" already handled by whitespace collapsing
+        compact = key.replace(" ", "")
+        if compact in aliases:
+            key2 = aliases[compact]
+        else:
+            key2 = aliases.get(key, None)
+
+        if key2 is not None:
+            for p in self.body_parts:
+                if p.name.lower() == key2:
+                    return p
+
+        # As a last resort: substring match (useful for "arm left" typos)
+        # Keep it conservative to avoid wrong matches.
+        if "arm" in key and "left" in key:
+            return next(p for p in self.body_parts if p.name.lower() == "left arm")
+        if "arm" in key and "right" in key:
+            return next(p for p in self.body_parts if p.name.lower() == "right arm")
+        if "leg" in key and "left" in key:
+            return next(p for p in self.body_parts if p.name.lower() == "left leg")
+        if "leg" in key and "right" in key:
+            return next(p for p in self.body_parts if p.name.lower() == "right leg")
+        if "hand" in key and "left" in key:
+            return next(p for p in self.body_parts if p.name.lower() == "left hand")
+        if "hand" in key and "right" in key:
+            return next(p for p in self.body_parts if p.name.lower() == "right hand")
+        if "foot" in key and "left" in key:
+            return next(p for p in self.body_parts if p.name.lower() == "left foot")
+        if "foot" in key and "right" in key:
+            return next(p for p in self.body_parts if p.name.lower() == "right foot")
+        if key in ("torso", "body", "chest"):
+            return next(p for p in self.body_parts if p.name.lower() == "torso")
+
+        valid = ", ".join(p.name for p in self.body_parts)
+        raise ValueError(f"Unknown body part '{name}'. Valid: {valid}")

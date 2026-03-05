@@ -31,14 +31,14 @@ def main() -> None:
     game_map = GameMap.generate_streets(map_w, map_h)
 
     if type(game_map) == tuple:
-        game_map, items = game_map
+        game_map, crates = game_map
         game_map.set_blood() # initialize blood grid
     else:
-        items = []
+        crates = []
         game_map.set_blood() # initialize blood grid
 
     engine = Engine(game_map=game_map, layout=layout) # TODO: game engine loads next map in maps_data
-    engine.items.extend(items)
+    engine.crates.extend(crates)
     engine.setup_demo_match()
     engine.log.add("Aiming: move cursor with arrows, Enter to shoot, Esc to cancel.")
 
