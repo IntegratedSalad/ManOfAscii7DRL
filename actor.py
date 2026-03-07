@@ -375,17 +375,17 @@ class Actor:
         wounded_parts = [p for p in self.body_parts if p.wounded and p.hp > 0]
         untreated = [p for p in wounded_parts if not is_bandaged(p)]
 
-        iron_ticks = getattr(self, "blood_regen_ticks", 0)
+        iron_ticks = self.blood_regen_ticks
         iron_active = iron_ticks > 0
 
         status = None
         if untreated and not iron_active:
             status = "No iron supplemented!"
             fg = fg_map['warn']
-        elif (untreated or not untreated) and iron_active:
+        elif iron_active:
             status = "Iron supplemented :)"
             fg = fg_map["good"]
-
+        print(iron_active)
         return (status, fg, bg)
 
     def is_enemy_of(self, other: "Actor") -> bool:

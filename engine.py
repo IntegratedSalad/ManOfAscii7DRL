@@ -319,9 +319,11 @@ class Engine:
             return
 
         if ev.sym == tcod.event.KeySym.RETURN:
+            print(inv)
             if not inv:
                 return
             it = inv[self.inv_index]
+            print(it)
             # block usage during bullet animation is already handled in your early return
 
             # Spend AP to use item (tune cost)
@@ -330,6 +332,7 @@ class Engine:
                 return
 
             consumed = it.use(self, sel)  # Engine acts as ctx (add log_add + spawn_explosion methods below)
+            print(f"Is consumed: {consumed}")
             if consumed:
                 # stackables
                 if getattr(it, "stackable", False) and it.qty > 1:
