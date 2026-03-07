@@ -144,6 +144,53 @@ class Engine:
                 return it
         return None
 
+    def _give_item(self, actor, it):
+        inv = getattr(actor, "inventory", [])
+        if getattr(it, "stackable", False):
+            for ex in inv:
+                if ex.name == it.name and getattr(ex, "stackable", False):
+                    ex.qty += getattr(it, "qty", 1)
+                    return
+        inv.append(it)
+
+    def _roll_weapon_item(self):
+        return random.choice([RIFLE, SMG, SNIPER])
+
+    def _roll_med_loot(self) -> list:
+        """Return a list[Item] like Bandage/IronSupplement with random qty."""
+        loot = []
+
+        # bandages: 0..3 (skewed towards 1-2)
+        band_qty = random.choices([0, 1, 2, 3], weights=[1, 4, 3, 1], k=1)[0]
+        if band_qty > 0:
+            loot.append(Bandage(
+                name="Bandage",
+                ch=ord("#"),
+                fg=(245, 245, 221),
+                stackable=True,
+                qty=band_qty,
+                power=3,
+            ))
+
+        # iron: 0..6 (skewed towards 2-4)
+        iron_qty = random.choices([0, 1, 2, 3, 4, 5, 6], weights=[1, 2, 4, 4, 3, 2, 1], k=1)[0]
+        if iron_qty > 0:
+            loot.append(IronSupplement(
+                name="Iron Supplement",
+                ch=ord("!"),
+                fg=(255, 255, 255),
+                stackable=True,
+                qty=iron_qty,
+                regen=2,
+                duration=12,
+            ))
+
+        # Ensure “med crate” always gives *something*
+        if not loot:
+            loot.append(Bandage(name="Bandage", ch=ord("#"), fg=(245,245,221), stackable=True, qty=1, power=3))
+
+        return loot
+
     def _add_to_inventory(self, actor, item) -> None:
         """
         Add item to actor inventory.
@@ -642,6 +689,7 @@ class Engine:
 
         if ev.sym == tcod.event.KeySym.O:
             self.try_open_door()
+            self.try_open_crate()
             return
 
         if ev.sym == tcod.event.KeySym.C:
@@ -729,13 +777,6 @@ class Engine:
             a.tick_blood_regen()
 
     def end_turn(self) -> None:
-        # for a in self.alive_actors():
-        #     loss = a.tick_bleeding()
-        #     if loss > 0:
-        #         self.log.add(f"{a.get_short_name()} loses {loss} blood!")
-        #         if not a.alive:
-        #             self.log.add(f"{a.get_short_name()} bleeds out!")
-
         self.aiming = False
         self.current_team = 1 - self.current_team
         self.team_ap[self.current_team] = self.team_ap_max
@@ -813,24 +854,24 @@ class Engine:
             it.y = None
             return
 
-        # 2) crates
-        crate = self.crate_at(sel.x, sel.y)
-        if crate is not None:
-            if crate.kind == "ammo":
-                sel.ammo_reserve += crate.amount
-                self.log.add(f"{sel.get_short_name()} takes ammo (+{crate.amount}).")
-            elif crate.kind == "med":
-                # if you switched to blood, feel free to change this to blood restore
-                before = sel.blood
-                sel.blood = min(sel.blood_max, sel.blood + crate.amount * 5)
-                self.log.add(f"{sel.get_short_name()} uses medkit (+{sel.blood - before} blood).")
+        # # 2) crates
+        # crate = self.crate_at(sel.x, sel.y)
+        # if crate is not None:
+        #     if crate.kind == "ammo":
+        #         sel.ammo_reserve += crate.amount
+        #         self.log.add(f"{sel.get_short_name()} takes ammo (+{crate.amount}).")
+        #     elif crate.kind == "med":
+        #         # if you switched to blood, feel free to change this to blood restore
+        #         before = sel.blood
+        #         sel.blood = min(sel.blood_max, sel.blood + crate.amount * 5)
+        #         self.log.add(f"{sel.get_short_name()} uses medkit (+{sel.blood - before} blood).")
 
-            # remove crate from world
-            try:
-                self.crates.remove(crate)
-            except ValueError:
-                pass
-            return
+        #     # remove crate from world
+        #     try:
+        #         self.crates.remove(crate)
+        #     except ValueError:
+        #         pass
+        #     return
 
         # 3) nothing here -> refund AP (QoL)
         self.team_ap[self.current_team] += self.PICKUP_COST
@@ -902,6 +943,42 @@ class Engine:
 
         sel.x, sel.y = nx, ny
         self.aim_x, self.aim_y = sel.x, sel.y
+
+    def try_open_crate(self) -> None:
+        sel = self.get_selected_actor()
+        if not sel or not sel.alive:
+            return
+
+        c = self.crate_at(sel.x, sel.y)
+        if not c:
+            self.log.add("No crate here.")
+            return
+
+        OPEN_COST = 2
+        if not self._spend_ap(OPEN_COST):
+            return
+
+        if c.kind == "ammo":
+            # random weapon
+            if random.random() < 0.8:
+                new_weapon = self._roll_weapon_item()
+                old_weapon = sel.weapon
+                sel.weapon = new_weapon
+                self.log.add(f"{sel.get_short_name()} opens the crate: found {new_weapon.name}! (replaced {old_weapon.name})")
+            else:
+                bullets = random.choice([6, 8, 10, 12])
+                sel.ammo_reserve += bullets
+            self.log.add(f"{sel.get_short_name()} opens the crate: +{bullets} ammo.")
+
+        elif c.kind == "med":
+            loot = self._roll_med_loot()
+            for it in loot:
+                self._give_item(sel, it)
+            names = ", ".join([f"{it.name} x{it.qty}" if getattr(it, "stackable", False) else it.name for it in loot])
+            self.log.add(f"{sel.get_short_name()} opens the med crate: {names}.")
+
+        # remove crate from map
+        self.crates.remove(c)
 
     def try_open_door(self) -> None:
         sel = self.get_selected_actor()
@@ -1311,6 +1388,9 @@ class Engine:
 
         it = self.crate_at(sel.x, sel.y)
         if it:
+            con.print(r.x + 1, r.y + 8, f"On tile: {it.name} (O)", fg=(220, 220, 180))
+        it = self.ground_item_at(sel.x, sel.y)
+        if it :
             con.print(r.x + 1, r.y + 8, f"On tile: {it.name} (G)", fg=(220, 220, 180))
 
     def _render_log_panel(self, con: tcod.Console) -> None:
