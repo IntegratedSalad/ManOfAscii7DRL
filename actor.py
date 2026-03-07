@@ -166,12 +166,17 @@ class Actor:
         return loss
 
     def tick_blood_regen(self) -> None:
+        if not self.alive:
+            return
+        if self.blood_regen_ticks <= 0 or self.blood_regen_amount <= 0:
+            self.blood_regen_ticks = 0
+            self.blood_regen_amount = 0
+            return
         self.blood_regen_ticks -= 1
         self.blood = min(self.blood_max, self.blood + self.blood_regen_amount)
         if self.blood_regen_ticks <= 0:
+            self.blood_regen_ticks = 0
             self.blood_regen_amount = 0
-        if self.blood_regen_amount > 0:
-            print(f"{self.get_short_name()} regenerates {self.blood_regen_amount} blood!")
 
     def tick_bandages(self, ap_spent: int) -> int:
         """
@@ -388,7 +393,6 @@ class Actor:
         elif iron_active:
             status = "Iron supplemented :)"
             fg = fg_map["good"]
-        print(iron_active)
         return (status, fg, bg)
 
     def is_enemy_of(self, other: "Actor") -> bool:

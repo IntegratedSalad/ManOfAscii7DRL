@@ -15,7 +15,7 @@ import textwrap
 from utils import *
 from enum import Enum, auto
 from name_generation import *
-from item import Bandage, IronSupplement
+from item import Bandage, IronSupplement, Item
 
 class UIState(Enum):
     PLAY = auto()
@@ -83,8 +83,14 @@ class Engine:
         self.grid_h = len(maps_grid)
         self.grid_w = len(maps_grid[0]) if self.grid_h > 0 else 0
 
+        self.ground_items_grid: list[list[list[Item]]] = [
+            [[] for _ in range(self.grid_w)] for _ in range(self.grid_h)
+        ]
+
         self.gx = max(0, min(self.grid_w - 1, start_gx))
         self.gy = max(0, min(self.grid_h - 1, start_gy))
+        self.ground_items: list[Item] = []
+        self._load_current_cell_ground_items()
 
         self.game_map: GameMap = self.maps_grid[self.gy][self.gx]
         self.spawned_enemy_cells: set[tuple[int, int]] = set()
@@ -124,6 +130,45 @@ class Engine:
 
         self.pending_impact: Optional[PendingImpact] = None
 
+    def _load_current_cell_ground_items(self) -> None:
+        self.ground_items = list(self.ground_items_grid[self.gy][self.gx])
+
+    def _save_current_cell_ground_items(self) -> None:
+        self.ground_items_grid[self.gy][self.gx] = list(self.ground_items)
+
+    def ground_item_at(self, x: int, y: int) -> Optional[Item]:
+        print(self.ground_items)
+        print(f"Trying to pick up at: {x} {y}")
+        for it in self.ground_items:
+            if it.x == x and it.y == y:
+                return it
+        return None
+
+    def _add_to_inventory(self, actor, item) -> None:
+        """
+        Add item to actor inventory.
+        If stackable and same-name exists, increase qty.
+        """
+        inv = getattr(actor, "inventory", [])
+        if getattr(item, "stackable", False):
+            for it in inv:
+                if getattr(it, "name", None) == item.name and getattr(it, "stackable", False):
+                    it.qty += getattr(item, "qty", 1)
+                    return
+        inv.append(item)
+
+    def _remove_ground_item(self, item) -> None:
+        # remove exact object if present
+        try:
+            self.ground_items.remove(item)
+        except ValueError:
+                pass
+
+    def _get_inventory(self, actor):
+        if not hasattr(actor, "inventory") or actor.inventory is None:
+            actor.inventory = []
+        return actor.inventory
+
     def _load_current_cell_crates(self) -> None:
         """Load crates for current grid cell into self.crates."""
         self.crates = list(self.crates_grid[self.gy][self.gx])
@@ -139,13 +184,14 @@ class Engine:
         if nx < 0 or nx >= self.grid_w or ny < 0 or ny >= self.grid_h:
             return False
 
-        # save current cell state
         self._save_current_cell_crates()
+        self._save_current_cell_ground_items()
 
         # switch
         self.gx, self.gy = nx, ny
         self.game_map = self.maps_grid[self.gy][self.gx]
         self._load_current_cell_crates()
+        self._load_current_cell_ground_items()
         if not getattr(self.game_map, "blood", None):
             self.game_map.set_blood()
 
@@ -424,7 +470,6 @@ class Engine:
         self.pending_impact = None
 
         if imp.impact_type == "actor" and imp.actor and imp.actor.alive:
-            print("sssss")
             hit_part = imp.actor.take_hit(imp.damage, imp.acc)
             self.log.add(
                 f"{imp.shooter_obj.get_short_name()} hits {imp.actor.get_short_name()} ({hit_part.name}) "
@@ -513,43 +558,51 @@ class Engine:
             return
 
         if ev.sym == tcod.event.KeySym.RETURN:
-            print(inv)
             if not inv:
                 return
-            it = inv[self.inv_index]
-            print(it)
-            # block usage during bullet animation is already handled in your early return
 
-            # Spend AP to use item (tune cost)
+            self.inv_index = max(0, min(self.inv_index, len(inv) - 1))
+            it = inv[self.inv_index]
+
             USE_COST = 2
             if not self._spend_ap(USE_COST):
                 return
 
-            consumed = it.use(self, sel)  # Engine acts as ctx (add log_add + spawn_explosion methods below)
-            print(f"Is consumed: {consumed}")
-            if consumed:
-                # stackables
-                if getattr(it, "stackable", False) and it.qty > 1:
-                    it.qty -= 1
-                else:
+            used = it.use(self, sel)
+            if not used:
+                return
+
+            if getattr(it, "stackable", False):
+                it.qty -= 1
+                if it.qty <= 0:
                     inv.pop(self.inv_index)
-                    self.inv_index = max(0, min(self.inv_index, len(inv) - 1))
-            return
+            else:
+                inv.pop(self.inv_index)
+
+            if inv:
+                self.inv_index = max(0, min(self.inv_index, len(inv) - 1))
+            else:
+                self.inv_index = 0
+                self.ui_mode = UIState.PLAY  # optional: auto-close when empty
 
         if ev.sym == tcod.event.KeySym.d:
-            # Drop item onto ground at player's tile
             if not inv:
                 return
+
+            self.inv_index = max(0, min(self.inv_index, len(inv) - 1))
+
             DROP_COST = 1
             if not self._spend_ap(DROP_COST):
                 return
+
             it = inv.pop(self.inv_index)
-            # You already have Item instances with x,y for map items; if your inventory items
-            # don't have x,y, create a "world item" wrapper or just add attributes:
+
             it.x, it.y = sel.x, sel.y
-            self.items.append(it)
+            self.ground_items.append(it)
+            print(it.x, it.y)
+
             self.log.add(f"{sel.get_short_name()} drops {it.name}.")
-            self.inv_index = max(0, min(self.inv_index, len(inv) - 1))
+            self.inv_index = 0 if not inv else max(0, min(self.inv_index, len(inv) - 1))
             return
 
     def _handle_keydown(self, ev: tcod.event.KeyDown) -> None:
@@ -580,7 +633,6 @@ class Engine:
             return
 
         if ev.sym == tcod.event.KeySym.TAB:
-            print(self.get_selected_actor().blood)
             self._cycle_selected(+1)
             return
 
@@ -737,6 +789,53 @@ class Engine:
 
         self._check_victory()
 
+    def try_pickup(self) -> None:
+        sel = self.get_selected_actor()
+        if not sel or not sel.alive:
+            return
+
+        if not self._spend_ap(self.PICKUP_COST):
+            return
+
+        # 1) ground item
+        it = self.ground_item_at(sel.x, sel.y)
+        if it is not None:
+            # remove from ground, add to inventory
+            self._remove_ground_item(it)
+
+            # clear world coords (optional, but avoids confusion)
+            if hasattr(it, "x"): delattr(it, "x")
+            if hasattr(it, "y"): delattr(it, "y")
+
+            self._add_to_inventory(sel, it)
+            self.log.add(f"{sel.get_short_name()} picks up {it.name}.")
+            it.x = None
+            it.y = None
+            return
+
+        # 2) crates
+        crate = self.crate_at(sel.x, sel.y)
+        if crate is not None:
+            if crate.kind == "ammo":
+                sel.ammo_reserve += crate.amount
+                self.log.add(f"{sel.get_short_name()} takes ammo (+{crate.amount}).")
+            elif crate.kind == "med":
+                # if you switched to blood, feel free to change this to blood restore
+                before = sel.blood
+                sel.blood = min(sel.blood_max, sel.blood + crate.amount * 5)
+                self.log.add(f"{sel.get_short_name()} uses medkit (+{sel.blood - before} blood).")
+
+            # remove crate from world
+            try:
+                self.crates.remove(crate)
+            except ValueError:
+                pass
+            return
+
+        # 3) nothing here -> refund AP (QoL)
+        self.team_ap[self.current_team] += self.PICKUP_COST
+        self.log.add("Nothing to pick up.")
+
     def try_move_selected(self, dx: int, dy: int) -> None:
         sel = self.get_selected_actor()
         if not sel or not sel.alive:
@@ -838,28 +937,6 @@ class Engine:
 
         loaded = sel.reload()
         self.log.add(f"{sel.get_short_name()} reloads (+{loaded}).")
-
-    def try_pickup(self) -> None:
-        sel = self.get_selected_actor()
-        if not sel or not sel.alive:
-            return
-        it = self.crate_at(sel.x, sel.y)
-        if not it:
-            self.log.add("Nothing to pick up.")
-            return
-        if not self._spend_ap(self.PICKUP_COST):
-            return
-
-        # if crate
-        if it.kind == "ammo":
-            sel.ammo_reserve += it.amount
-            self.log.add(f"{sel.get_short_name()} picks up ammo (+{it.amount}).")
-        elif it.kind == "med":
-            before = sel.hp
-            sel.hp = min(sel.hp_max, sel.hp + it.amount)
-            self.log.add(f"{sel.get_short_name()} uses medkit (+{sel.hp - before} HP).")
-
-        self.crates.remove(it)
 
     def miss_offset_by_acc_(self, acc: int) -> int:
         # If roll >= acc, so offset decreases with accuracy increase
@@ -1080,6 +1157,9 @@ class Engine:
 
         for a in self.alive_actors():
             con.print(r.x + a.x, r.y + a.y, chr(a.ch), fg=a.fg)
+
+        for it in self.ground_items:
+            con.print(r.x + it.x, r.y + it.y, chr(it.ch), fg=it.fg)
 
         sel = self.get_selected_actor()
         if sel:

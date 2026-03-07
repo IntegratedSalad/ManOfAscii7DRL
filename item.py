@@ -32,6 +32,9 @@ class Item:
     stackable: bool = False
     qty: int = 1
 
+    x: Optional[int] = None
+    y: Optional[int] = None
+
     def can_use(self, user) -> bool: ...
     def use(self, ctx: UseContext, user) -> bool:
         ctx.log_add(f"{user.get_short_name()} doesn't know how to use {self.name}.")
@@ -42,31 +45,42 @@ class Bandage(Item): # helps with bleed_rate a little
     power: int = 3
 
     def use(self, ctx: UseContext, user) -> bool:
-        # Find candidate parts: wounded, not destroyed, not already bandaged
-        candidates = [
-            p for p in user.body_parts
-            if p.wounded and p.hp > 0 and not getattr(p, "is_bandaged", False)
-        ]
-        if not candidates:
+        if not getattr(user, "alive", True):
+            return False
+
+        # Wounded parts that are NOT destroyed
+        wounded = [p for p in user.body_parts if p.wounded and p.hp > 0]
+
+        # Prefer unbandaged wounds first
+        unbandaged = [p for p in wounded if not p.is_bandaged]
+        bandaged = [p for p in wounded if p.is_bandaged]
+
+        if not wounded:
             ctx.log_add(f"{user.get_short_name()} has nothing to bandage.")
             return False
 
         def severity(p):
-            return 1.0 - (p.hp / p.hp_max if p.hp_max > 0 else 1.0)
+            # higher => worse
+            if p.hp_max <= 0:
+                return 0.0
+            return 1.0 - (p.hp / p.hp_max)
 
-        part = max(candidates, key=severity)
+        if unbandaged:
+            part = max(unbandaged, key=severity)
+            part.bandage_ap_left = 100
+            part.bandage_bleed_acc = 0
+            user.recalc_bleed_rate_from_parts()
+            ctx.log_add(f"{user.get_short_name()} applies a bandage to {part.name} (100 AP).")
+            return True
 
-        # part.apply_bandage
-
-        # Apply bandage state (your AP-based mechanic)
+        # ---- Fallback: refresh the weakest existing bandage ----
+        # (So you can re-wrap / tighten it instead of a frustrating fail.)
+        part = min(bandaged, key=lambda p: p.bandage_ap_left)
         part.bandage_ap_left = 100
         part.bandage_bleed_acc = 0
-
-        # Important: remove this part from normal bleed_rate calc
         user.recalc_bleed_rate_from_parts()
-
-        ctx.log_add(f"{user.get_short_name()} applies a bandage to {part.name} (100 AP).")
-        return True  # consumed
+        ctx.log_add(f"{user.get_short_name()} re-bandages {part.name} (refresh 100 AP).")
+        return True
 
 @dataclass
 class IronSupplement(Item): # provides blood regen
