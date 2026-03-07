@@ -4,11 +4,14 @@ from engine import Engine
 from map import GameMap
 from screen import ScreenLayout
 from pathlib import Path
+import sys
 
 THIS_DIR = Path(__file__) / '..'
-FONT = THIS_DIR / "assets/Unknown_curses_12x12.png"
-
-print(FONT.resolve())
+def resource_path(rel: str) -> Path:
+    # When bundled by PyInstaller, files are unpacked to sys._MEIPASS
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base / rel
+FONT = resource_path("assets/Unknown_curses_12x12.png")
 
 def _make_cell(gen_fn, w: int, h: int):
     cell = gen_fn(w, h)
@@ -22,7 +25,7 @@ def _make_cell(gen_fn, w: int, h: int):
 def main() -> None:
     layout = ScreenLayout.default()
     tileset = tcod.tileset.load_tilesheet(
-        FONT.resolve(),
+        str(FONT),
         columns=16,
         rows=16,
         charmap=tcod.tileset.CHARMAP_CP437,

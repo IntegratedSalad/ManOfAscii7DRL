@@ -137,8 +137,6 @@ class Engine:
         self.ground_items_grid[self.gy][self.gx] = list(self.ground_items)
 
     def ground_item_at(self, x: int, y: int) -> Optional[Item]:
-        print(self.ground_items)
-        print(f"Trying to pick up at: {x} {y}")
         for it in self.ground_items:
             if it.x == x and it.y == y:
                 return it
@@ -958,6 +956,7 @@ class Engine:
         if not self._spend_ap(OPEN_COST):
             return
 
+        bullets = 0
         if c.kind == "ammo":
             # random weapon
             if random.random() < 0.8:
