@@ -67,34 +67,54 @@ class MessageLog:
     # add support for colors e.g. by storing List[Tuple[str, Color]] and adjusting rendering
 
 class Engine:
-    def __init__(self, game_map: GameMap, layout: ScreenLayout) -> None:
-        self.game_map = game_map
+    def __init__(
+        self,
+        maps_grid: List[List[GameMap]],
+        crates_grid: List[List[List[Crate]]],
+        layout: ScreenLayout,
+        start_gx: int = 1,
+        start_gy: int = 2,
+    ) -> None:
         self.layout = layout
 
+        # --- world grid ---
+        self.maps_grid = maps_grid
+        self.crates_grid = crates_grid
+        self.grid_h = len(maps_grid)
+        self.grid_w = len(maps_grid[0]) if self.grid_h > 0 else 0
+
+        self.gx = max(0, min(self.grid_w - 1, start_gx))
+        self.gy = max(0, min(self.grid_h - 1, start_gy))
+
+        self.game_map: GameMap = self.maps_grid[self.gy][self.gx]
+        self.spawned_enemy_cells: set[tuple[int, int]] = set()
+
+        # --- UI ---
         self.ui_mode = UIState.PLAY
         self.sheet_tab = SheetTab.OVERVIEW
         self.sheet_scroll = 0
 
+        # --- entities ---
         self.actors: List[Actor] = []
         self.crates: List[Crate] = []
+        self._load_current_cell_crates()
 
-        # bullet animation state: path and current index
-        self.bullet_path: List[Tuple[int,int]] = []
-        self.bullet_index: int = 0  # which step is currently visible
-        self.bullet_timer = 0.0  # time accumulator for advancing bullet animation
-        self.bullet_step_time = 0.03  # time per step in seconds
+        # --- bullet animation ---
+        self.bullet_path: List[Tuple[int, int]] = []
+        self.bullet_index: int = 0
+        self.bullet_timer = 0.0
+        self.bullet_step_time = 0.03
 
         self.log = MessageLog(lines=[], layout=self.layout)
         self.running = True
 
-        self.current_team: int = 1  # 1 attackers start, 0 defenders
+        self.current_team: int = 1
         self.team_ap = {0: 20, 1: 20}
         self.team_ap_max = 20
 
-        self.selected_index: int = 0  # index within filtered list of current team alive actors
+        self.selected_index: int = 0
         self.inv_index = 0
 
-        # Aiming mode
         self.aiming: bool = False
         self.aim_x: int = 0
         self.aim_y: int = 0
@@ -104,45 +124,116 @@ class Engine:
 
         self.pending_impact: Optional[PendingImpact] = None
 
+    def _load_current_cell_crates(self) -> None:
+        """Load crates for current grid cell into self.crates."""
+        self.crates = list(self.crates_grid[self.gy][self.gx])
+
+    def _save_current_cell_crates(self) -> None:
+        """Persist current self.crates back into the grid cell (so pickups remain gone)."""
+        self.crates_grid[self.gy][self.gx] = list(self.crates)
+
+    def try_change_map(self, dx: int, dy: int) -> bool:
+        """Switch to neighboring map cell. Returns True on success."""
+        nx = self.gx + dx
+        ny = self.gy + dy
+        if nx < 0 or nx >= self.grid_w or ny < 0 or ny >= self.grid_h:
+            return False
+
+        # save current cell state
+        self._save_current_cell_crates()
+
+        # switch
+        self.gx, self.gy = nx, ny
+        self.game_map = self.maps_grid[self.gy][self.gx]
+        self._load_current_cell_crates()
+        if not getattr(self.game_map, "blood", None):
+            self.game_map.set_blood()
+
+        self._spawn_enemies_for_current_cell()
+        self.log.add(f"Entered area ({self.gx},{self.gy}).")
+        self._clamp_selection()
+        sel = self.get_selected_actor()
+        if sel:
+            self.aim_x, self.aim_y = sel.x, sel.y
+        return True
+
     def setup_demo_match(self) -> None:
         w, h = self.game_map.w, self.game_map.h
 
-        starting_inventory = [
-            Bandage(name="Bandage", ch=ord("#"), fg = (245, 245, 221), stackable=True, qty=2, power=3),
-            IronSupplement(name="Iron Supplement", ch=ord("!"), fg=(255, 255, 255), stackable=True, qty=10, regen=2, duration=12)]
-        rand_data = generate_random_soldier_info()
-        starting_inventory = [
-            Bandage(name="Bandage", ch=ord("#"), fg = (245, 245, 221), stackable=True, qty=2, power=3),
-            IronSupplement(name="Iron Supplement", ch=ord("!"), fg=(255, 255, 255), stackable=True, qty=10, regen=2, duration=12)]
-        self.actors.append(Actor(0, w // 2 - 3, 3, ord("☻"), (120, 180, 255), 10, 10, RIFLE, 6, 100, inventory=starting_inventory, **rand_data))
-        rand_data = generate_random_soldier_info()
-        starting_inventory = [
-            Bandage(name="Bandage", ch=ord("#"), fg = (245, 245, 221), stackable=True, qty=2, power=3),
-            IronSupplement(name="Iron Supplement", ch=ord("!"), fg=(255, 255, 255), stackable=True, qty=10, regen=2, duration=12)]
-        self.actors.append(Actor(0, w // 2, 2, ord("☻"), (120, 180, 255), 10, 10, SMG, 10, 100, inventory=starting_inventory, **rand_data))
-        rand_data = generate_random_soldier_info()
-        starting_inventory = [
-            Bandage(name="Bandage", ch=ord("#"), fg = (245, 245, 221), stackable=True, qty=2, power=3),
-            IronSupplement(name="Iron Supplement", ch=ord("!"), fg=(255, 255, 255), stackable=True, qty=10, regen=2, duration=12)]
-        self.actors.append(Actor(0, w // 2 + 3, 4, ord("☻"), (120, 180, 255), 10, 10, SNIPER, 4, 100, inventory=starting_inventory, **rand_data))
+        def make_starting_inventory():
+            # fresh instances each time (no shared item objects across soldiers)
+            return [
+                Bandage(
+                    name="Bandage",
+                    ch=ord("#"),
+                    fg=(245, 245, 221),
+                    stackable=True,
+                    qty=2,
+                    power=3,
+                ),
+                IronSupplement(
+                    name="Iron Supplement",
+                    ch=ord("!"),
+                    fg=(255, 255, 255),
+                    stackable=True,
+                    qty=10,
+                    regen=2,
+                    duration=12,
+                ),
+            ]
 
-        y0 = h - 10
+        def spawn_soldier(
+            team_id: int,
+            x: int,
+            y: int,
+            weapon,
+            ammo_in_mag: int,
+            ammo_reserve: int,
+            fg,
+        ) -> None:
+            rand_data = generate_random_soldier_info()
+            inv = make_starting_inventory()
 
-        rand_data = generate_random_soldier_info()
-        starting_inventory = [
-            Bandage(name="Bandage", ch=ord("#"), fg = (245, 245, 221), stackable=True, qty=2, power=3),
-            IronSupplement(name="Iron Supplement", ch=ord("!"), fg=(255, 255, 255), stackable=True, qty=10, regen=2, duration=12)]
-        self.actors.append(Actor(1, w // 2 - 3, y0, ord("☻"), (255, 180, 120), 10, 10, RIFLE, 6, 100, inventory=starting_inventory, **rand_data))
-        rand_data = generate_random_soldier_info()
-        starting_inventory = [
-            Bandage(name="Bandage", ch=ord("#"), fg = (245, 245, 221), stackable=True, qty=2, power=3),
-            IronSupplement(name="Iron Supplement", ch=ord("!"), fg=(255, 255, 255), stackable=True, qty=10, regen=2, duration=12)]
-        self.actors.append(Actor(1, w // 2, y0 + 1, ord("☻"), (255, 180, 120), 10, 10, SMG, 10, 100, inventory=starting_inventory, **rand_data))
-        rand_data = generate_random_soldier_info()
-        starting_inventory = [
-            Bandage(name="Bandage", ch=ord("#"), fg = (245, 245, 221), stackable=True, qty=2, power=3),
-            IronSupplement(name="Iron Supplement", ch=ord("!"), fg=(255, 255, 255), stackable=True, qty=10, regen=2, duration=12)]
-        self.actors.append(Actor(1, w // 2 + 3, y0, ord("☻"), (255, 180, 120), 10, 10, SNIPER, 4, 100, inventory=starting_inventory, **rand_data))
+            a = Actor(
+                team_id,
+                x,
+                y,
+                ord("☻"),
+                fg,
+                10,
+                10,
+                weapon,
+                ammo_in_mag,
+                ammo_reserve,
+                inventory=inv,
+                **rand_data,
+            )
+            # IMPORTANT: put the actor into the *current* map cell
+            a.gx, a.gy = self.gx, self.gy
+            self.actors.append(a)
+
+        # --- spawn player team in current cell ---
+        # Decide who the "player team" is; your code uses current_team=1 initially.
+        # If you want player to control team 1 (ATK), spawn team 1 here.
+        player_team = 1
+        player_fg = (255, 180, 120) if player_team == 1 else (120, 180, 255)
+
+        y0 = h - 10  # bottom-ish
+        spawn_soldier(player_team, w // 2 - 3, y0,     RIFLE,  6, 100, player_fg)
+        spawn_soldier(player_team, w // 2,     y0 + 1, SMG,   10, 100, player_fg)
+        spawn_soldier(player_team, w // 2 + 3, y0,     SNIPER, 4, 100, player_fg)
+
+        # --- OPTIONAL: spawn defenders in the same starting cell (old behavior) ---
+        # If you keep this enabled, your "spawn enemies on entering new area" should
+        # detect already-present enemies and not double-spawn.
+        spawn_enemy_team_on_start = False
+        if spawn_enemy_team_on_start:
+            enemy_team = 1 - player_team
+            enemy_fg = (255, 180, 120) if enemy_team == 1 else (120, 180, 255)
+
+            spawn_soldier(enemy_team, w // 2 - 3, 3, RIFLE,  6, 100, enemy_fg)
+            spawn_soldier(enemy_team, w // 2,     2, SMG,   10, 100, enemy_fg)
+            spawn_soldier(enemy_team, w // 2 + 3, 4, SNIPER, 4, 100, enemy_fg)
 
         self.team_ap[0] = self.team_ap_max
         self.team_ap[1] = self.team_ap_max
@@ -152,20 +243,123 @@ class Engine:
         if sel:
             self.aim_x, self.aim_y = sel.x, sel.y
 
-        self.log.add("Controls: Arrows move | Tab cycle | F aim/fire | R reload | G pickup | Space end turn | C character sheet | Esc quit")
+        self.log.add(
+            "Controls: Arrows move | Tab cycle | F aim/fire | R reload | G pickup | "
+            "Space end turn | C character sheet | Esc quit"
+        )
+
         self.eating_names = [
-            "eat", "devour", "binge on", "feast on", "wolf down", "shovel in", "choke on", "suck on", "nom on", "gorge on", "snarf down", "inhale", "scarf down"
+            "eat", "devour", "binge on", "feast on", "wolf down", "shovel in",
+            "choke on", "suck on", "nom on", "gorge on", "snarf down", "inhale", "scarf down"
         ]
         self.eating_name = ""
 
+        # Optional: spawn enemies for this cell once at the start
+        # (if you want the starting cell to have enemies)
+        self._spawn_enemies_for_current_cell()
+
+        self.log.add(f"Spawned player squad in cell ({self.gx},{self.gy}).")
+
+    def _make_starting_inventory(self) -> list:
+        # Keep enemies simpler or same as player, up to you:
+        return [
+            Bandage(name="Bandage", ch=ord("#"), fg=(245, 245, 221), stackable=True, qty=1, power=3),
+            IronSupplement(name="Iron Supplement", ch=ord("!"), fg=(255, 255, 255), stackable=True, qty=3, regen=2, duration=12),
+        ]
+
+    def _spawn_enemies_for_current_cell(self) -> None:
+        cell = (self.gx, self.gy)
+        if cell in self.spawned_enemy_cells:
+            return
+
+        enemy_team = 0
+
+        # If already present in THIS cell, mark and exit
+        if any(a.alive and a.team_id == enemy_team and a.gx == self.gx and a.gy == self.gy for a in self.actors):
+            self.spawned_enemy_cells.add(cell)
+            return
+
+        # Collect friendly positions in this cell (so we don't spawn on top / too close)
+        friendly_team = 1 - enemy_team
+        friendlies = [
+            (a.x, a.y)
+            for a in self.actors
+            if a.alive and a.team_id == friendly_team and a.gx == self.gx and a.gy == self.gy
+        ]
+
+        def too_close_to_friendlies(x: int, y: int, min_dist: int = 6) -> bool:
+            for fx, fy in friendlies:
+                if abs(fx - x) + abs(fy - y) < min_dist:
+                    return True
+            return False
+
+        n = random.randint(3, 6)
+        weapons = [RIFLE, SMG, SNIPER]
+
+        # spawn band depends on biome row (optional flavor)
+        # NOTE: you use gy==0 streets, gy==1 forest, else beach.
+        if self.gy == 0:  # streets (top row)
+            y_min, y_max = self.game_map.h - 8, self.game_map.h - 2
+        elif self.gy == 1:  # forest (middle row)
+            y_min, y_max = self.game_map.h // 3, (self.game_map.h * 2) // 3
+        else:  # beach (bottom row)
+            y_min, y_max = 1, 8
+
+        spawned = 0
+        tries = 800
+
+        while spawned < n and tries > 0:
+            tries -= 1
+            x = random.randint(0, self.game_map.w - 1)
+            y = random.randint(max(0, y_min), min(self.game_map.h - 1, y_max))
+
+            if not self.game_map.is_walkable(x, y):
+                continue
+
+            if self.actor_at(x, y) is not None:
+                continue
+
+            # Don't spawn too close to friendlies (if any exist in this cell)
+            if friendlies and too_close_to_friendlies(x, y, min_dist=6):
+                continue
+
+            weapon = random.choice(weapons)
+            rand_data = generate_random_soldier_info()
+            inv = self._make_starting_inventory()
+
+            enemy = Actor(
+                enemy_team,
+                x,
+                y,
+                ord("☻"),
+                (120, 180, 255),
+                10,
+                10,
+                weapon,
+                weapon.mag_size,
+                100,
+                inventory=inv,
+                **rand_data,
+            )
+            enemy.gx, enemy.gy = self.gx, self.gy
+            self.actors.append(enemy)
+            spawned += 1
+
+        self.spawned_enemy_cells.add(cell)
+
+        if spawned > 0:
+            self.log.add(f"Enemy squad enters the area! (+{spawned})")
+        else:
+            self.log.add("Area seems quiet... (no valid spawn points)")
+
     def alive_actors(self) -> List[Actor]:
-        return [a for a in self.actors if a.alive]
+        return [a for a in self.actors if a.alive and a.gx == self.gx and a.gy == self.gy]
 
     def team_actors(self, team_id: int) -> List[Actor]:
-        return [a for a in self.actors if a.alive and a.team_id == team_id]
+        return [a for a in self.actors if a.alive and a.team_id == team_id and a.gx == self.gx and a.gy == self.gy]
 
     def enemy_actors(self, team_id: int) -> List[Actor]:
-        return [a for a in self.actors if a.alive and a.team_id != team_id]
+        return [a for a in self.actors if a.alive and a.team_id != team_id and a.gx == self.gx and a.gy == self.gy]
 
     def actor_at(self, x: int, y: int) -> Optional[Actor]:
         for a in self.alive_actors():
@@ -545,7 +739,48 @@ class Engine:
 
     def try_move_selected(self, dx: int, dy: int) -> None:
         sel = self.get_selected_actor()
+        if not sel or not sel.alive:
+            self.log.add("No soldier selected.")
+            return
         nx, ny = sel.x + dx, sel.y + dy
+
+        # --- map edge transitions ---
+        if nx < 0:
+            if not self.try_change_map(-1, 0):
+                return
+            sel.x = self.game_map.w - 1
+            sel.y = max(0, min(self.game_map.h - 1, ny))
+            self.aim_x, self.aim_y = sel.x, sel.y
+            sel.gx, sel.gy = self.gx, self.gy
+            return
+
+        if nx >= self.game_map.w:
+            if not self.try_change_map(+1, 0):
+                return
+            sel.x = 0
+            sel.y = max(0, min(self.game_map.h - 1, ny))
+            self.aim_x, self.aim_y = sel.x, sel.y
+            sel.gx, sel.gy = self.gx, self.gy
+            return
+
+        if ny < 0:
+            if not self.try_change_map(0, -1):
+                return
+            sel.y = self.game_map.h - 1
+            sel.x = max(0, min(self.game_map.w - 1, nx))
+            self.aim_x, self.aim_y = sel.x, sel.y
+            sel.gx, sel.gy = self.gx, self.gy
+            return
+
+        if ny >= self.game_map.h:
+            if not self.try_change_map(0, +1):
+                return
+            sel.y = 0
+            sel.x = max(0, min(self.game_map.w - 1, nx))
+            self.aim_x, self.aim_y = sel.x, sel.y
+            sel.gx, sel.gy = self.gx, self.gy
+            return
+
         tile_cost = self.game_map.return_movement_cost(nx, ny)
         if not sel or not sel.alive:
             return

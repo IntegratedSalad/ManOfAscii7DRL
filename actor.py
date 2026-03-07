@@ -75,6 +75,9 @@ class Actor:
     occupation: str
     inventory: List[Item]
 
+    gx: int = 0
+    gy: int = 0
+
     alive: bool = True
     blood: int = 100
     blood_max: int = 100
