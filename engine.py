@@ -1608,5 +1608,6 @@ class Engine:
             qty = f" x{it.qty}" if getattr(it, "stackable", False) and it.qty > 1 else ""
             con.print(x + 2, top + row, f"{marker} {it.name}{qty}", fg=(220,220,220))
 
+    # interface
     def log_add(self, msg: str) -> None:
         self.log.add(msg)
